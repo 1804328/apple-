@@ -60,6 +60,58 @@ export function removeOnServer(cfg: ChannelConfig, reminderId: string): Promise<
   return request(cfg, `/api/reminders/${encodeURIComponent(reminderId)}`, { method: 'DELETE' });
 }
 
+interface CloudReminderRow {
+  id: string;
+  title: string;
+  note?: string;
+  fire_at: number;
+  tz?: string;
+  force_level?: number;
+  created_at: number;
+  steps?: { after_sec?: number; afterSec?: number; channels?: string[] }[];
+}
+
+function rowToReminder(row: CloudReminderRow): Reminder {
+  return {
+    id: row.id,
+    title: row.title,
+    note: row.note ?? '',
+    fireAt: Number(row.fire_at) * 1000,
+    tz: row.tz ?? 'Asia/Shanghai',
+    forceLevel: Number(row.force_level ?? 3),
+    steps: (row.steps ?? []).map((step) => ({
+      afterSec: Number(step.after_sec ?? step.afterSec ?? 0),
+      channels: Array.isArray(step.channels) ? step.channels : [],
+    })),
+    status: 'pending',
+    createdAt: Number(row.created_at) * 1000,
+    alarmIds: [],
+  };
+}
+
+/**
+ * 从云端拉回待触发的提醒。
+ * 免费签名 7 天过期 = 必须重装 = 本地数据清空，靠这个把提醒捡回来。
+ */
+export async function fetchPendingReminders(cfg: ChannelConfig): Promise<{
+  ok: boolean;
+  reminders?: Reminder[];
+  error?: string;
+}> {
+  if (!enabled(cfg)) return { ok: false, error: '未开启云端同步' };
+  try {
+    const res = await fetch(`${base(cfg)}/api/reminders?status=pending&limit=100`, {
+      headers: headers(cfg),
+    });
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    const data = (await res.json()) as { ok?: boolean; reminders?: CloudReminderRow[] };
+    if (!data.ok || !Array.isArray(data.reminders)) return { ok: false, error: '返回格式异常' };
+    return { ok: true, reminders: data.reminders.map(rowToReminder) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function checkHealth(cfg: ChannelConfig): Promise<ApiResult> {
   if (!base(cfg)) return { ok: false, error: '未填写服务器地址' };
   try {

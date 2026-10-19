@@ -173,9 +173,37 @@ export default {
       return json({ ok: false, error: 'unauthorized' }, 401);
     }
 
-    // 列表（调试用）
+    // 列表：App 启动时用来从云端恢复提醒；?status=pending&limit=100
     if (pathname === '/api/reminders' && request.method === 'GET') {
-      return json({ ok: true, reminders: await db.listReminders(env.DB) });
+      const status = url.searchParams.get('status');
+      const limit = Math.min(Number(url.searchParams.get('limit') ?? 100) || 100, 200);
+      const rows = status
+        ? await db.listRemindersByStatus(env.DB, status, limit)
+        : await db.listReminders(env.DB, limit);
+
+      return json({
+        ok: true,
+        reminders: rows.map((row) => {
+          let steps = [];
+          try {
+            steps = JSON.parse(row.steps);
+          } catch {
+            steps = [];
+          }
+          return {
+            id: row.id,
+            title: row.title,
+            note: row.note,
+            fire_at: row.fire_at,
+            tz: row.tz,
+            force_level: row.force_level,
+            status: row.status,
+            created_at: row.created_at,
+            acked_at: row.acked_at,
+            steps,
+          };
+        }),
+      });
     }
 
     // 创建 / 编辑

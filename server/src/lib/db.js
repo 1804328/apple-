@@ -104,6 +104,15 @@ export async function listReminders(db, limit = 50) {
   return results ?? [];
 }
 
+/** 按状态查询，App 启动时用 status=pending 恢复本地缺失的提醒 */
+export async function listRemindersByStatus(db, status = 'pending', limit = 100) {
+  const { results } = await db
+    .prepare(`SELECT * FROM reminders WHERE status = ? ORDER BY fire_at ASC LIMIT ?`)
+    .bind(status, limit)
+    .all();
+  return results ?? [];
+}
+
 /**
  * App 创建/编辑提醒时同步上来。id 由 App 生成（本地优先）。
  * @returns {Promise<{id:string, ack_token:string}>}

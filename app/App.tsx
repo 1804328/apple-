@@ -24,7 +24,7 @@ import {
   scheduleFor,
   setupNotificationHandler,
 } from './src/services/alarms';
-import { ackOnServer, removeOnServer, syncReminder } from './src/services/api';
+import { ackOnServer, fetchPendingReminders, removeOnServer, syncReminder } from './src/services/api';
 
 type Screen = 'list' | 'new' | 'settings';
 
@@ -59,12 +59,40 @@ export default function App() {
     (async () => {
       const [stored, storedConfig] = await Promise.all([loadReminders(), loadConfig()]);
       if (!mounted) return;
-      setReminders(stored);
-      remindersRef.current = stored;
+
       setConfig(storedConfig);
-      setOverdue(findOverduePending(stored));
       setReady(true);
       requestPermissions().catch(() => undefined);
+
+      // 先展示本地数据
+      let current: Reminder[] = stored;
+      setReminders(current);
+      remindersRef.current = current;
+      setOverdue(findOverduePending(current));
+
+      if (!storedConfig.syncEnabled) return;
+
+      // 重装 / 重签后本地是空的，从云端把待触发的提醒拉回来
+      const cloud = await fetchPendingReminders(storedConfig);
+      if (!mounted || !cloud.ok || !cloud.reminders) return;
+
+      const localIds = new Set(current.map((item) => item.id));
+      const missing = cloud.reminders.filter((item) => !localIds.has(item.id));
+      if (missing.length === 0) return;
+
+      const restored: Reminder[] = [];
+      for (const item of missing) {
+        const alarmIds = await scheduleFor(item).catch(() => [] as string[]);
+        restored.push({ ...item, alarmIds });
+      }
+
+      current = [...current, ...restored];
+      await saveReminders(current);
+      if (!mounted) return;
+      setReminders(current);
+      remindersRef.current = current;
+      setOverdue(findOverduePending(current));
+      Alert.alert('已从云端恢复提醒', `恢复了 ${restored.length} 条（重装或重签后会自动同步）。`);
     })();
 
     const sub = AppState.addEventListener('change', (state) => {
