@@ -5,6 +5,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -94,6 +95,7 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
     initial ? new Date(initial.fireAt) : presetDate('hour'),
   );
   const [forceLevel, setForceLevel] = useState(initial?.forceLevel ?? 3);
+  const [repeatYearly, setRepeatYearly] = useState(initial?.repeat === 'yearly');
   const [showAndroidPicker, setShowAndroidPicker] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -124,6 +126,7 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
       fireAt: fireAt.getTime(),
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
       forceLevel,
+      repeat: repeatYearly ? 'yearly' : 'none',
       steps,
       status: 'pending',
       createdAt: initial?.createdAt ?? Date.now(),
@@ -186,6 +189,7 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
             value={fireAt}
             mode="datetime"
             display="spinner"
+            locale="zh-CN"
             themeVariant="dark"
             textColor={colors.text}
             onChange={(_event, date) => {
@@ -231,6 +235,19 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
         <Text style={styles.forceDesc}>
           {FORCE_OPTIONS.find((o) => o.level === forceLevel)?.desc}
         </Text>
+
+        <View style={styles.switchRow}>
+          <View style={styles.switchTextWrap}>
+            <Text style={styles.switchLabel}>每年重复</Text>
+            <Text style={styles.switchHint}>生日、结婚纪念日选这个；确认后自动滚到明年</Text>
+          </View>
+          <Switch
+            value={repeatYearly}
+            onValueChange={setRepeatYearly}
+            trackColor={{ false: '#2a3442', true: '#2f5da8' }}
+            thumbColor={repeatYearly ? colors.accent : '#8b9bb0'}
+          />
+        </View>
 
         <Text style={styles.label}>升级链预览</Text>
         <View style={styles.steps}>
@@ -328,6 +345,19 @@ const styles = StyleSheet.create({
   forceLabel: { color: colors.textDim, fontSize: 14, fontWeight: '600' },
   forceLabelActive: { color: colors.text },
   forceDesc: { color: colors.textFaint, fontSize: 12, marginTop: spacing.sm },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: spacing.lg,
+  },
+  switchTextWrap: { flex: 1, marginRight: spacing.md },
+  switchLabel: { color: colors.text, fontSize: 15, fontWeight: '600' },
+  switchHint: { color: colors.textFaint, fontSize: 12, marginTop: 2 },
   steps: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   stepChip: {
     backgroundColor: colors.card,

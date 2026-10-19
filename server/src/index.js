@@ -83,8 +83,13 @@ export async function runScheduler(env, now = Math.floor(Date.now() / 1000)) {
 
   for (const row of rows) {
     if (shouldMarkMissed(row, now)) {
-      await db.markMissed(env.DB, row.id, now);
-      log.push({ reminderId: row.id, action: 'missed' });
+      if (row.repeat === 'yearly') {
+        const next = await db.rollYearly(env.DB, row, now);
+        log.push({ reminderId: row.id, action: 'rolled', next_fire_at: next });
+      } else {
+        await db.markMissed(env.DB, row.id, now);
+        log.push({ reminderId: row.id, action: 'missed' });
+      }
       continue;
     }
 
@@ -164,8 +169,15 @@ export default {
     if (ackMatch) {
       const row = await db.findByAckToken(env.DB, ackMatch[1], now);
       if (!row) return new Response(ackPage(null, false), { status: 410, headers: { 'content-type': 'text/html; charset=utf-8' } });
-      await db.markAcked(env.DB, row.id, now);
-      if (url.searchParams.get('json') === '1') return json({ ok: true, reminder: row.title });
+      let rolledTo = null;
+      if (row.repeat === 'yearly') {
+        rolledTo = await db.rollYearly(env.DB, row, now);
+      } else {
+        await db.markAcked(env.DB, row.id, now);
+      }
+      if (url.searchParams.get('json') === '1') {
+        return json({ ok: true, reminder: row.title, repeat: row.repeat ?? 'none', rolled_to: rolledTo });
+      }
       return new Response(ackPage(row, true), { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
 
@@ -197,6 +209,7 @@ export default {
             fire_at: row.fire_at,
             tz: row.tz,
             force_level: row.force_level,
+            repeat: row.repeat ?? 'none',
             status: row.status,
             created_at: row.created_at,
             acked_at: row.acked_at,
@@ -231,6 +244,11 @@ export default {
     // App 内确认
     const ackApi = pathname.match(/^\/api\/reminders\/([^/]+)\/ack$/);
     if (ackApi && request.method === 'POST') {
+      const row = await db.getReminder(env.DB, ackApi[1]);
+      if (row?.repeat === 'yearly') {
+        const next = await db.rollYearly(env.DB, row, now);
+        return json({ ok: true, repeat: 'yearly', rolled_to: next });
+      }
       await db.markAcked(env.DB, ackApi[1], now);
       return json({ ok: true });
     }

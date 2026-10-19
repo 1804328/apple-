@@ -121,13 +121,14 @@ export async function upsertReminder(db, payload, now) {
   const existing = await getReminder(db, payload.id);
   const ackToken = existing?.ack_token ?? newAckToken();
   const ackExp = Math.max(Number(payload.fire_at) + 86400, now + 7 * 86400);
+  const repeat = payload.repeat === 'yearly' ? 'yearly' : 'none';
 
   await db
     .prepare(
       `INSERT INTO reminders
-         (id, user_id, title, note, fire_at, tz, steps, force_level, status,
+         (id, user_id, title, note, fire_at, tz, steps, force_level, repeat, status,
           acked_at, ack_token, ack_token_exp, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          note = excluded.note,
@@ -135,6 +136,7 @@ export async function upsertReminder(db, payload, now) {
          tz = excluded.tz,
          steps = excluded.steps,
          force_level = excluded.force_level,
+         repeat = excluded.repeat,
          status = 'pending',
          acked_at = NULL,
          ack_token_exp = excluded.ack_token_exp,
@@ -149,6 +151,7 @@ export async function upsertReminder(db, payload, now) {
       String(payload.tz ?? 'Asia/Shanghai'),
       JSON.stringify(payload.steps ?? []),
       Number(payload.force_level ?? 3),
+      repeat,
       ackToken,
       ackExp,
       existing?.created_at ?? now,
@@ -157,6 +160,64 @@ export async function upsertReminder(db, payload, now) {
     .run();
 
   return { id: payload.id, ack_token: ackToken };
+}
+
+/** 取某个时刻在指定时区的偏移量（毫秒） */
+function timezoneOffsetMs(date, timeZone) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  const parts = Object.fromEntries(dtf.formatToParts(date).map((p) => [p.type, p.value]));
+  const asUTC = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour) % 24,
+    Number(parts.minute),
+    Number(parts.second),
+  );
+  return asUTC - date.getTime();
+}
+
+/** 下一年同一时刻（按提醒自己的时区算，闰年不会漂） */
+export function nextYearEpoch(epochSec, tz = 'Asia/Shanghai') {
+  try {
+    const date = new Date(epochSec * 1000);
+    const offset = timezoneOffsetMs(date, tz);
+    const local = new Date(date.getTime() + offset);
+    local.setUTCFullYear(local.getUTCFullYear() + 1);
+    return Math.floor((local.getTime() - offset) / 1000);
+  } catch {
+    return epochSec + 365 * 86400;
+  }
+}
+
+/**
+ * 每年重复的提醒「完成/错过」后滚到明年：重置为 pending、清空本周期投递记录，
+ * 这样即使 App 没装，服务器也会继续按年提醒。
+ * @returns {Promise<number>} 新的 fire_at（epoch 秒）
+ */
+export async function rollYearly(db, row, now) {
+  const next = nextYearEpoch(Number(row.fire_at), row.tz);
+  const ackExp = Math.max(next + 86400, now + 7 * 86400);
+  await db
+    .prepare(
+      `UPDATE reminders
+          SET fire_at = ?, status = 'pending', acked_at = NULL,
+              ack_token_exp = ?, updated_at = ?
+        WHERE id = ?`,
+    )
+    .bind(next, ackExp, now, row.id)
+    .run();
+  await db.prepare(`DELETE FROM deliveries WHERE reminder_id = ?`).bind(row.id).run();
+  return next;
 }
 
 export async function deleteReminder(db, id) {

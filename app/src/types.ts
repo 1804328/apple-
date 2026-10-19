@@ -15,6 +15,8 @@ export interface Reminder {
   tz: string;
   /** 1..6，见 PLAN §1.4 */
   forceLevel: number;
+  /** none | yearly：每年重复（生日/纪念日用） */
+  repeat?: 'none' | 'yearly';
   steps: EscalationStep[];
   status: ReminderStatus;
   createdAt: number;

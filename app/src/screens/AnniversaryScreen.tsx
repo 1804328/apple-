@@ -1,9 +1,9 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { colors, radius, spacing } from '../theme';
-import { formatDateTime } from '../lib/time';
+import { formatDateTime, stepsForLevel } from '../lib/time';
 import { MILESTONE_OPTIONS, buildAnniversaryReminders, milestoneLabel, previewMilestones } from '../lib/anniversary';
 import type { Reminder } from '../types';
 
@@ -21,6 +21,7 @@ export default function AnniversaryScreen({ onCancel, onGenerate }: Props) {
   });
   const [selected, setSelected] = useState<number[]>([100, 365, 1000]);
   const [customDays, setCustomDays] = useState('');
+  const [yearly, setYearly] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const previews = useMemo(() => previewMilestones(baseDate, selected), [baseDate, selected]);
@@ -49,6 +50,35 @@ export default function AnniversaryScreen({ onCancel, onGenerate }: Props) {
       setError('先给这个纪念日起个名字');
       return;
     }
+
+    // 每年重复模式（生日）：只生成一条，完成后自动滚到明年
+    if (yearly) {
+      const now = Date.now();
+      const next = new Date(baseDate);
+      next.setHours(9, 0, 0, 0);
+      while (next.getTime() <= now) next.setFullYear(next.getFullYear() + 1);
+      const baseKey = `${baseDate.getFullYear()}-${baseDate.getMonth() + 1}-${baseDate.getDate()}`;
+      const fireAt = next.getTime();
+      setError(null);
+      onGenerate([
+        {
+          id: `yearly-${baseKey}`,
+          title: trimmed,
+          note: `每年重复 · 起点 ${baseKey}`,
+          fireAt,
+          tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
+          forceLevel: 3,
+          repeat: 'yearly',
+          steps: stepsForLevel(3).filter(
+            (step) => step.afterSec >= 0 || fireAt + step.afterSec * 1000 > now,
+          ),
+          status: 'pending',
+          createdAt: now,
+        },
+      ]);
+      return;
+    }
+
     if (selected.length === 0) {
       setError('至少勾选一个里程碑');
       return;
@@ -90,6 +120,7 @@ export default function AnniversaryScreen({ onCancel, onGenerate }: Props) {
           value={baseDate}
           mode="date"
           display="spinner"
+          locale="zh-CN"
           themeVariant="dark"
           textColor={colors.text}
           onChange={(_event, date) => {
@@ -97,52 +128,71 @@ export default function AnniversaryScreen({ onCancel, onGenerate }: Props) {
           }}
         />
 
-        <Text style={styles.label}>里程碑</Text>
-        <View style={styles.chips}>
-          {MILESTONE_OPTIONS.map((days) => {
-            const active = selected.includes(days);
-            return (
-              <Pressable
-                key={days}
-                style={[styles.chip, active && styles.chipActive]}
-                onPress={() => toggle(days)}
-              >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                  {milestoneLabel(days)}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <View style={styles.customRow}>
-          <TextInput
-            value={customDays}
-            onChangeText={setCustomDays}
-            placeholder="自定义：输入天数"
-            placeholderTextColor={colors.textFaint}
-            keyboardType="number-pad"
-            style={styles.customInput}
+        <View style={styles.switchRow}>
+          <View style={styles.switchTextWrap}>
+            <Text style={styles.switchLabel}>每年重复（生日 / 结婚纪念日）</Text>
+            <Text style={styles.switchHint}>只在每年同一天提醒，确认后自动滚到明年</Text>
+          </View>
+          <Switch
+            value={yearly}
+            onValueChange={setYearly}
+            trackColor={{ false: '#2a3442', true: '#2f5da8' }}
+            thumbColor={yearly ? colors.accent : '#8b9bb0'}
           />
-          <Pressable style={styles.customAdd} onPress={addCustom}>
-            <Text style={styles.customAddText}>添加</Text>
-          </Pressable>
         </View>
 
-        <Text style={styles.label}>将生成 {upcoming.length} 条提醒</Text>
-        <View style={styles.previewList}>
-          {previews.map((item) => (
-            <View key={item.days} style={styles.previewRow}>
-              <Text style={[styles.previewName, item.skipped && styles.previewSkipped]}>
-                {milestoneLabel(item.days)}
-              </Text>
-              <Text style={[styles.previewDate, item.skipped && styles.previewSkipped]}>
-                {item.skipped ? '已过去' : formatDateTime(item.date.getTime())}
-              </Text>
+        {yearly ? (
+          <Text style={styles.hint}>每年同一天 09:00 提醒，不需要选里程碑。</Text>
+        ) : (
+          <>
+            <Text style={styles.label}>里程碑</Text>
+            <View style={styles.chips}>
+              {MILESTONE_OPTIONS.map((days) => {
+                const active = selected.includes(days);
+                return (
+                  <Pressable
+                    key={days}
+                    style={[styles.chip, active && styles.chipActive]}
+                    onPress={() => toggle(days)}
+                  >
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                      {milestoneLabel(days)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
-          ))}
-          {previews.length === 0 ? <Text style={styles.previewEmpty}>还没选里程碑</Text> : null}
-        </View>
+
+            <View style={styles.customRow}>
+              <TextInput
+                value={customDays}
+                onChangeText={setCustomDays}
+                placeholder="自定义：输入天数"
+                placeholderTextColor={colors.textFaint}
+                keyboardType="number-pad"
+                style={styles.customInput}
+              />
+              <Pressable style={styles.customAdd} onPress={addCustom}>
+                <Text style={styles.customAddText}>添加</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.label}>将生成 {upcoming.length} 条提醒</Text>
+            <View style={styles.previewList}>
+              {previews.map((item) => (
+                <View key={item.days} style={styles.previewRow}>
+                  <Text style={[styles.previewName, item.skipped && styles.previewSkipped]}>
+                    {milestoneLabel(item.days)}
+                  </Text>
+                  <Text style={[styles.previewDate, item.skipped && styles.previewSkipped]}>
+                    {item.skipped ? '已过去' : formatDateTime(item.date.getTime())}
+                  </Text>
+                </View>
+              ))}
+              {previews.length === 0 ? <Text style={styles.previewEmpty}>还没选里程碑</Text> : null}
+            </View>
+          </>
+        )}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -198,6 +248,20 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: spacing.lg,
+  },
+  switchTextWrap: { flex: 1, marginRight: spacing.md },
+  switchLabel: { color: colors.text, fontSize: 15, fontWeight: '600' },
+  switchHint: { color: colors.textFaint, fontSize: 12, marginTop: 2 },
+  hint: { color: colors.textFaint, fontSize: 13, marginTop: spacing.md, lineHeight: 20 },
   chip: {
     borderWidth: 1,
     borderColor: colors.border,

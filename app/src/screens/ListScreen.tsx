@@ -70,6 +70,7 @@ function ReminderCard({
             {overdue ? '已到点' : formatCountdown(reminder.fireAt, now)}
           </Text>
         ) : null}
+        {reminder.repeat === 'yearly' ? <Text style={styles.metaRepeat}>每年</Text> : null}
         {syncEnabled && reminder.syncedAt ? <Text style={styles.metaSynced}>云端已登记</Text> : null}
       </View>
 
@@ -319,6 +320,7 @@ const styles = StyleSheet.create({
   metaTime: { color: colors.textDim, fontSize: 13 },
   metaCountdown: { color: colors.accent, fontSize: 13, fontWeight: '600' },
   metaOverdue: { color: colors.danger },
+  metaRepeat: { color: '#9dc0ff', fontSize: 11 },
   metaSynced: { color: colors.ok, fontSize: 11, marginLeft: 'auto' },
   note: { color: colors.textFaint, fontSize: 13, marginTop: spacing.xs, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },

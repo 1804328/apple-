@@ -62,3 +62,10 @@ export function formatFireLabel(ms: number, now = Date.now()): string {
 export function fromNow(minutes: number, from = Date.now()): number {
   return from + minutes * 60000;
 }
+
+/** 下一年同一天（按本地时区；2/29 会自动滚到 3/1） */
+export function nextYear(ms: number): number {
+  const d = new Date(ms);
+  d.setFullYear(d.getFullYear() + 1);
+  return d.getTime();
+}

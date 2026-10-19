@@ -26,6 +26,7 @@ import {
   scheduleFor,
   setupNotificationHandler,
 } from './src/services/alarms';
+import { nextYear } from './src/lib/time';
 import { ackOnServer, fetchPendingReminders, removeOnServer, syncReminder } from './src/services/api';
 
 type Screen = 'list' | 'new' | 'settings' | 'anniversary';
@@ -194,6 +195,23 @@ export default function App() {
 
   const handleAck = useCallback(
     async (reminder: Reminder) => {
+      // 每年重复：不落成"已完成"，而是滚到明年同一天继续提醒
+      if (reminder.repeat === 'yearly') {
+        await cancelFor(reminder.alarmIds ?? []);
+        const fireAt = nextYear(reminder.fireAt);
+        const rolled: Reminder = { ...reminder, fireAt, status: 'pending', ackedAt: undefined, alarmIds: [] };
+        const alarmIds = await scheduleFor(rolled).catch(() => [] as string[]);
+        const saved: Reminder = { ...rolled, alarmIds, syncedAt: Date.now() };
+        const nextList = reminders.map((item) => (item.id === saved.id ? saved : item));
+        await persist(nextList);
+        setOverdue((prev) => (prev?.id === reminder.id ? null : prev));
+        if (config.syncEnabled) {
+          await syncReminder(config, saved);
+        }
+        Alert.alert('明年的提醒已排好', `「${reminder.title}」已滚到明年同一天。`);
+        return;
+      }
+
       await cancelFor(reminder.alarmIds ?? []);
       const next = reminders.map((item) =>
         item.id === reminder.id

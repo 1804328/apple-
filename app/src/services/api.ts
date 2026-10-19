@@ -47,6 +47,7 @@ export function syncReminder(cfg: ChannelConfig, reminder: Reminder): Promise<Ap
       fire_at: Math.floor(reminder.fireAt / 1000),
       tz: reminder.tz,
       force_level: reminder.forceLevel,
+      repeat: reminder.repeat ?? 'none',
       steps: reminder.steps.map((s) => ({ after_sec: s.afterSec, channels: s.channels })),
     }),
   });
@@ -67,6 +68,7 @@ interface CloudReminderRow {
   fire_at: number;
   tz?: string;
   force_level?: number;
+  repeat?: 'none' | 'yearly';
   created_at: number;
   steps?: { after_sec?: number; afterSec?: number; channels?: string[] }[];
 }
@@ -79,6 +81,7 @@ function rowToReminder(row: CloudReminderRow): Reminder {
     fireAt: Number(row.fire_at) * 1000,
     tz: row.tz ?? 'Asia/Shanghai',
     forceLevel: Number(row.force_level ?? 3),
+    repeat: row.repeat === 'yearly' ? 'yearly' : 'none',
     steps: (row.steps ?? []).map((step) => ({
       afterSec: Number(step.after_sec ?? step.afterSec ?? 0),
       channels: Array.isArray(step.channels) ? step.channels : [],
