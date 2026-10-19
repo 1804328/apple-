@@ -37,7 +37,8 @@
     },
     "plugins": ["@react-native-community/datetimepicker"],
     "extra": {
-      "apiBaseUrl": ""
+      "apiBaseUrl": "https://ryanlewis.dpdns.org",
+      "apiKey": "829393b8066a414c909e31d611613fad5da083c158e346ccada619c50b788965"
     }
   }
 }

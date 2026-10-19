@@ -1,18 +1,21 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, SafeAreaView, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, SafeAreaView, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
 import ListScreen from './src/screens/ListScreen';
 import NewReminderScreen from './src/screens/NewReminderScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import OverdueScreen from './src/screens/OverdueScreen';
 import { colors } from './src/theme';
 import type { ChannelConfig, Reminder } from './src/types';
 import {
+  DEFAULT_CONFIG,
+  findOverduePending,
+  groupReminders,
   loadConfig,
   loadReminders,
   saveConfig,
   saveReminders,
-  splitReminders,
 } from './src/store/reminders';
 import {
   alarmKitAvailable,
@@ -25,57 +28,93 @@ import { ackOnServer, removeOnServer, syncReminder } from './src/services/api';
 
 type Screen = 'list' | 'new' | 'settings';
 
-const EMPTY_CONFIG: ChannelConfig = { apiBaseUrl: '', apiKey: '', syncEnabled: false };
+const SNOOZE_MS = 5 * 60 * 1000;
 
 export default function App() {
   const [ready, setReady] = useState(false);
   const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [config, setConfig] = useState<ChannelConfig>(EMPTY_CONFIG);
+  const [config, setConfig] = useState<ChannelConfig>(DEFAULT_CONFIG);
   const [screen, setScreen] = useState<Screen>('list');
+  const [editing, setEditing] = useState<Reminder | null>(null);
+  const [overdue, setOverdue] = useState<Reminder | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
-  // 倒计时需要周期性重算
-  const [, tick] = useState(0);
+  const remindersRef = useRef<Reminder[]>([]);
+  useEffect(() => {
+    remindersRef.current = reminders;
+  }, [reminders]);
+
+  // App 在前台时也要能弹出确认页：每 30 秒的 tick 也会触发检查
+  useEffect(() => {
+    if (!ready || screen === 'new') return;
+    const next = findOverduePending(remindersRef.current, now);
+    if (next) setOverdue((prev) => prev ?? next);
+  }, [now, ready, screen]);
 
   useEffect(() => {
     setupNotificationHandler();
-    const timer = setInterval(() => tick((n) => n + 1), 30_000);
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
 
     let mounted = true;
     (async () => {
       const [stored, storedConfig] = await Promise.all([loadReminders(), loadConfig()]);
       if (!mounted) return;
       setReminders(stored);
+      remindersRef.current = stored;
       setConfig(storedConfig);
+      setOverdue(findOverduePending(stored));
       setReady(true);
-      // 权限申请放在数据加载之后，避免首屏白屏等弹窗
       requestPermissions().catch(() => undefined);
     })();
+
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      setNow(Date.now());
+      const next = findOverduePending(remindersRef.current);
+      if (next) setOverdue(next);
+    });
 
     return () => {
       mounted = false;
       clearInterval(timer);
+      sub.remove();
     };
   }, []);
 
   const persist = useCallback(async (next: Reminder[]) => {
     setReminders(next);
+    remindersRef.current = next;
     await saveReminders(next);
   }, []);
 
-  const handleCreate = useCallback(
+  const handleSave = useCallback(
     async (reminder: Reminder) => {
+      const previous = editing;
+      if (previous) {
+        await cancelFor(previous.alarmIds ?? []);
+      }
       const alarmIds = await scheduleFor(reminder).catch(() => [] as string[]);
       const saved: Reminder = { ...reminder, alarmIds };
-      const next = [...reminders, saved];
+
+      const exists = reminders.some((item) => item.id === saved.id);
+      const next = exists
+        ? reminders.map((item) => (item.id === saved.id ? saved : item))
+        : [...reminders, saved];
+
       await persist(next);
       setScreen('list');
+      setEditing(null);
+      setOverdue(findOverduePending(next));
 
       const sync = await syncReminder(config, saved);
       if (config.syncEnabled && !sync.ok) {
-        Alert.alert('已保存在本机', `云端同步失败：${sync.error ?? '未知错误'}\n\n到点仍会本地响，但微信/短信兜底暂时不会生效。`);
+        Alert.alert(
+          '已保存在本机',
+          `云端同步失败：${sync.error ?? '未知错误'}\n\n到点仍会本地响，但微信/短信兜底暂时不会生效。`,
+        );
       }
     },
-    [config, persist, reminders],
+    [config, editing, persist, reminders],
   );
 
   const handleAck = useCallback(
@@ -87,12 +126,33 @@ export default function App() {
           : item,
       );
       await persist(next);
+      setOverdue((prev) => (prev?.id === reminder.id ? null : prev));
+
       if (config.syncEnabled) {
         const result = await ackOnServer(config, reminder.id);
         if (!result.ok) {
-          // 本地已确认；云端确认失败只影响是否继续升级，提示但不阻塞
           console.warn('ack sync failed', result.error);
         }
+      }
+    },
+    [config, persist, reminders],
+  );
+
+  const handleSnooze = useCallback(
+    async (reminder: Reminder) => {
+      const nextFireAt = Date.now() + SNOOZE_MS;
+      await cancelFor(reminder.alarmIds ?? []);
+      const rescheduled: Reminder = { ...reminder, fireAt: nextFireAt, status: 'pending' };
+      const alarmIds = await scheduleFor(rescheduled).catch(() => [] as string[]);
+      const saved: Reminder = { ...rescheduled, alarmIds };
+
+      const next = reminders.map((item) => (item.id === saved.id ? saved : item));
+      await persist(next);
+      setOverdue(null);
+      setNow(Date.now());
+
+      if (config.syncEnabled) {
+        await syncReminder(config, saved);
       }
     },
     [config, persist, reminders],
@@ -108,6 +168,7 @@ export default function App() {
           onPress: async () => {
             await cancelFor(reminder.alarmIds ?? []);
             await persist(reminders.filter((item) => item.id !== reminder.id));
+            setOverdue((prev) => (prev?.id === reminder.id ? null : prev));
             if (config.syncEnabled) removeOnServer(config, reminder.id).catch(() => undefined);
           },
         },
@@ -149,26 +210,41 @@ export default function App() {
     );
   }
 
-  const { upcoming, finished } = splitReminders(reminders);
+  const groups = groupReminders(reminders, now);
 
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
+
       {screen === 'list' ? (
         <ListScreen
-          upcoming={upcoming}
-          finished={finished}
+          groups={groups}
           alarmKitAvailable={alarmKitAvailable}
           syncEnabled={config.syncEnabled && config.apiBaseUrl.length > 0}
-          onNew={() => setScreen('new')}
+          now={now}
+          onNew={() => {
+            setEditing(null);
+            setScreen('new');
+          }}
           onAck={handleAck}
+          onEdit={(item) => {
+            setEditing(item);
+            setScreen('new');
+          }}
           onDelete={handleDelete}
           onOpenSettings={() => setScreen('settings')}
         />
       ) : null}
 
       {screen === 'new' ? (
-        <NewReminderScreen onCancel={() => setScreen('list')} onSave={handleCreate} />
+        <NewReminderScreen
+          initial={editing ?? undefined}
+          onCancel={() => {
+            setEditing(null);
+            setScreen('list');
+          }}
+          onSave={handleSave}
+        />
       ) : null}
 
       {screen === 'settings' ? (
@@ -180,6 +256,12 @@ export default function App() {
           onRequestPermissions={handleRequestPermissions}
         />
       ) : null}
+
+      {overdue ? (
+        <View style={styles.overlay}>
+          <OverdueScreen reminder={overdue} onDone={handleAck} onSnooze={handleSnooze} />
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -187,4 +269,12 @@ export default function App() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   loading: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.bg,
+  },
 });

@@ -1,23 +1,19 @@
 import React from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radius, spacing } from '../theme';
 import { formatCountdown, formatFireLabel } from '../lib/time';
 import type { Reminder } from '../types';
+import type { ReminderGroups } from '../store/reminders';
 
 interface Props {
-  upcoming: Reminder[];
-  finished: Reminder[];
+  groups: ReminderGroups;
   alarmKitAvailable: boolean;
   syncEnabled: boolean;
+  now: number;
   onNew: () => void;
   onAck: (reminder: Reminder) => void;
+  onEdit: (reminder: Reminder) => void;
   onDelete: (reminder: Reminder) => void;
   onOpenSettings: () => void;
 }
@@ -33,28 +29,43 @@ const FORCE_LABEL: Record<number, string> = {
 
 function ReminderCard({
   reminder,
+  now,
   onAck,
+  onEdit,
   onDelete,
 }: {
   reminder: Reminder;
+  now: number;
   onAck: (r: Reminder) => void;
+  onEdit: (r: Reminder) => void;
   onDelete: (r: Reminder) => void;
 }) {
   const pending = reminder.status === 'pending';
+  const overdue = pending && reminder.fireAt <= now;
+
   return (
-    <View style={[styles.card, !pending && styles.cardDone]}>
+    <Pressable
+      style={({ pressed }) => [styles.card, !pending && styles.cardDone, pressed && styles.cardPressed]}
+      onPress={() => onEdit(reminder)}
+    >
       <View style={styles.cardTop}>
         <Text style={styles.cardTitle} numberOfLines={2}>
           {reminder.title}
         </Text>
         <View style={[styles.badge, pending ? styles.badgePending : styles.badgeDone]}>
-          <Text style={styles.badgeText}>{pending ? FORCE_LABEL[reminder.forceLevel] ?? '标准' : '已完成'}</Text>
+          <Text style={styles.badgeText}>
+            {pending ? (overdue ? '待确认' : FORCE_LABEL[reminder.forceLevel] ?? '标准') : '已完成'}
+          </Text>
         </View>
       </View>
 
       <View style={styles.metaRow}>
-        <Text style={styles.metaTime}>{formatFireLabel(reminder.fireAt)}</Text>
-        {pending ? <Text style={styles.metaCountdown}>{formatCountdown(reminder.fireAt)}</Text> : null}
+        <Text style={styles.metaTime}>{formatFireLabel(reminder.fireAt, now)}</Text>
+        {pending ? (
+          <Text style={[styles.metaCountdown, overdue && styles.metaOverdue]}>
+            {overdue ? '已到点' : formatCountdown(reminder.fireAt, now)}
+          </Text>
+        ) : null}
       </View>
 
       {reminder.note ? (
@@ -65,35 +76,61 @@ function ReminderCard({
 
       <View style={styles.actions}>
         {pending ? (
-          <Pressable style={styles.actionPrimary} onPress={() => onAck(reminder)}>
+          <Pressable
+            style={styles.actionPrimary}
+            onPress={(event) => {
+              event.stopPropagation();
+              onAck(reminder);
+            }}
+          >
             <Text style={styles.actionPrimaryText}>已确认</Text>
           </Pressable>
         ) : null}
-        <Pressable style={styles.actionGhost} onPress={() => onDelete(reminder)}>
+        <Pressable
+          style={styles.actionGhost}
+          onPress={(event) => {
+            event.stopPropagation();
+            onDelete(reminder);
+          }}
+        >
           <Text style={styles.actionGhostText}>删除</Text>
         </Pressable>
       </View>
+    </Pressable>
+  );
+}
+
+function Section({ label, tone, children }: { label: string; tone?: 'danger'; children: React.ReactNode }) {
+  return (
+    <View>
+      <Text style={[styles.sectionLabel, tone === 'danger' && styles.sectionDanger]}>{label}</Text>
+      {children}
     </View>
   );
 }
 
 export default function ListScreen({
-  upcoming,
-  finished,
+  groups,
   alarmKitAvailable,
   syncEnabled,
+  now,
   onNew,
   onAck,
+  onEdit,
   onDelete,
   onOpenSettings,
 }: Props) {
+  const total = groups.overdue.length + groups.today.length + groups.later.length;
+
   return (
     <View style={styles.root}>
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>强提醒</Text>
           <Text style={styles.subtitle}>
-            {upcoming.length > 0 ? `${upcoming.length} 条待触发` : '还没有待触发的提醒'}
+            {total > 0
+              ? `${total} 条待触发${groups.overdue.length > 0 ? ` · ${groups.overdue.length} 条待确认` : ''}`
+              : '还没有待触发的提醒'}
           </Text>
         </View>
         <Pressable style={styles.settingsButton} onPress={onOpenSettings} hitSlop={12}>
@@ -104,21 +141,19 @@ export default function ListScreen({
       {!alarmKitAvailable ? (
         <View style={styles.banner}>
           <Text style={styles.bannerText}>
-            当前不是 iOS 26+ 或未授权闹钟权限：到点只能发通知，静音/勿扰下可能不响。
+            未开启闹钟权限：到点只能发通知，静音/勿扰下可能不响。
           </Text>
         </View>
       ) : null}
 
       {!syncEnabled ? (
         <View style={[styles.banner, styles.bannerWarn]}>
-          <Text style={styles.bannerText}>
-            云端升级未开启：微信/短信兜底不会生效。去设置里填服务器地址。
-          </Text>
+          <Text style={styles.bannerText}>云端升级未开启，微信兜底不会生效。</Text>
         </View>
       ) : null}
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-        {upcoming.length === 0 ? (
+        {total === 0 && groups.finished.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyIcon}>⏰</Text>
             <Text style={styles.emptyTitle}>设一个不会错过的日期</Text>
@@ -126,18 +161,67 @@ export default function ListScreen({
               报名截止、还房租、签证到期——到点它会响，没确认就升级到微信。
             </Text>
           </View>
-        ) : (
-          upcoming.map((item) => (
-            <ReminderCard key={item.id} reminder={item} onAck={onAck} onDelete={onDelete} />
-          ))
-        )}
-
-        {finished.length > 0 ? (
-          <Text style={styles.sectionLabel}>历史</Text>
         ) : null}
-        {finished.map((item) => (
-          <ReminderCard key={item.id} reminder={item} onAck={onAck} onDelete={onDelete} />
-        ))}
+
+        {groups.overdue.length > 0 ? (
+          <Section label="待确认" tone="danger">
+            {groups.overdue.map((item) => (
+              <ReminderCard
+                key={item.id}
+                reminder={item}
+                now={now}
+                onAck={onAck}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
+            ))}
+          </Section>
+        ) : null}
+
+        {groups.today.length > 0 ? (
+          <Section label="今天">
+            {groups.today.map((item) => (
+              <ReminderCard
+                key={item.id}
+                reminder={item}
+                now={now}
+                onAck={onAck}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
+            ))}
+          </Section>
+        ) : null}
+
+        {groups.later.length > 0 ? (
+          <Section label="以后">
+            {groups.later.map((item) => (
+              <ReminderCard
+                key={item.id}
+                reminder={item}
+                now={now}
+                onAck={onAck}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
+            ))}
+          </Section>
+        ) : null}
+
+        {groups.finished.length > 0 ? (
+          <Section label="历史">
+            {groups.finished.map((item) => (
+              <ReminderCard
+                key={item.id}
+                reminder={item}
+                now={now}
+                onAck={onAck}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
+            ))}
+          </Section>
+        ) : null}
       </ScrollView>
 
       <Pressable style={styles.fab} onPress={onNew}>
@@ -182,6 +266,14 @@ const styles = StyleSheet.create({
   bannerWarn: { borderColor: '#3a2f1a' },
   bannerText: { color: colors.textDim, fontSize: 12, lineHeight: 18 },
   list: { paddingHorizontal: spacing.lg, paddingBottom: 120 },
+  sectionLabel: {
+    color: colors.textFaint,
+    fontSize: 12,
+    letterSpacing: 1,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  sectionDanger: { color: colors.danger },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
@@ -190,6 +282,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     marginBottom: spacing.md,
   },
+  cardPressed: { backgroundColor: colors.cardPressed },
   cardDone: { opacity: 0.55 },
   cardTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   cardTitle: { color: colors.text, fontSize: 18, fontWeight: '700', flex: 1, marginRight: spacing.sm },
@@ -200,6 +293,7 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm, gap: spacing.md },
   metaTime: { color: colors.textDim, fontSize: 13 },
   metaCountdown: { color: colors.accent, fontSize: 13, fontWeight: '600' },
+  metaOverdue: { color: colors.danger },
   note: { color: colors.textFaint, fontSize: 13, marginTop: spacing.xs, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   actionPrimary: {
@@ -217,13 +311,6 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   actionGhostText: { color: colors.textFaint, fontSize: 13 },
-  sectionLabel: {
-    color: colors.textFaint,
-    fontSize: 12,
-    letterSpacing: 1,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-  },
   empty: { alignItems: 'center', paddingVertical: 80, paddingHorizontal: spacing.xl },
   emptyIcon: { fontSize: 44, marginBottom: spacing.md },
   emptyTitle: { color: colors.text, fontSize: 18, fontWeight: '700', marginBottom: spacing.sm },

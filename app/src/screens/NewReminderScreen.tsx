@@ -17,6 +17,7 @@ import type { Reminder } from '../types';
 interface Props {
   onCancel: () => void;
   onSave: (reminder: Reminder) => void;
+  initial?: Reminder;
 }
 
 const FORCE_OPTIONS = [
@@ -64,11 +65,13 @@ function presetDate(kind: 'hour' | 'tonight' | 'tomorrow'): Date {
   return t;
 }
 
-export default function NewReminderScreen({ onCancel, onSave }: Props) {
-  const [title, setTitle] = useState('');
-  const [note, setNote] = useState('');
-  const [fireAt, setFireAt] = useState<Date>(() => presetDate('hour'));
-  const [forceLevel, setForceLevel] = useState(3);
+export default function NewReminderScreen({ onCancel, onSave, initial }: Props) {
+  const [title, setTitle] = useState(initial?.title ?? '');
+  const [note, setNote] = useState(initial?.note ?? '');
+  const [fireAt, setFireAt] = useState<Date>(() =>
+    initial ? new Date(initial.fireAt) : presetDate('hour'),
+  );
+  const [forceLevel, setForceLevel] = useState(initial?.forceLevel ?? 3);
   const [showAndroidPicker, setShowAndroidPicker] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,13 +83,13 @@ export default function NewReminderScreen({ onCancel, onSave }: Props) {
       setError('先写一句话：这条提醒是干嘛的');
       return;
     }
-    if (fireAt.getTime() <= Date.now()) {
+    if (!initial && fireAt.getTime() <= Date.now()) {
       setError('时间已经过去了，选一个未来的时刻');
       return;
     }
     setError(null);
     onSave({
-      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      id: initial?.id ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       title: trimmed,
       note: note.trim(),
       fireAt: fireAt.getTime(),
@@ -94,7 +97,7 @@ export default function NewReminderScreen({ onCancel, onSave }: Props) {
       forceLevel,
       steps,
       status: 'pending',
-      createdAt: Date.now(),
+      createdAt: initial?.createdAt ?? Date.now(),
     });
   }
 
@@ -104,7 +107,7 @@ export default function NewReminderScreen({ onCancel, onSave }: Props) {
         <Pressable onPress={onCancel} hitSlop={12}>
           <Text style={styles.headerGhost}>取消</Text>
         </Pressable>
-        <Text style={styles.headerTitle}>新建提醒</Text>
+        <Text style={styles.headerTitle}>{initial ? '编辑提醒' : '新建提醒'}</Text>
         <Pressable onPress={submit} hitSlop={12}>
           <Text style={styles.headerDone}>保存</Text>
         </Pressable>
@@ -212,7 +215,7 @@ export default function NewReminderScreen({ onCancel, onSave }: Props) {
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <Pressable style={styles.saveButton} onPress={submit}>
-          <Text style={styles.saveButtonText}>创建提醒</Text>
+          <Text style={styles.saveButtonText}>{initial ? '保存修改' : '创建提醒'}</Text>
         </Pressable>
 
         <Text style={styles.footnote}>
