@@ -1,0 +1,123 @@
+# 一键部署：Cloudflare Worker + D1 + 企业微信通道
+# 用法（在 server 目录）：
+#   1) npx --yes wrangler@4 login
+#   2) powershell -ExecutionPolicy Bypass -File .\deploy.ps1
+
+$ErrorActionPreference = 'Stop'
+Set-Location $PSScriptRoot
+
+$TOML = Join-Path $PSScriptRoot 'wrangler.toml'
+$D1_NAME = 'strong-reminder'
+$DEFAULT_API_KEY = '829393b8066a414c909e31d611613fad5da083c158e346ccada619c50b788965'
+
+function Step($text) {
+  Write-Host ""
+  Write-Host "== $text ==" -ForegroundColor Cyan
+}
+
+function Run($cmd) {
+  Write-Host "> $cmd" -ForegroundColor DarkGray
+  $out = Invoke-Expression "$cmd 2>&1" | Out-String
+  Write-Host $out
+  return $out
+}
+
+function Write-Utf8NoBom($path, $text) {
+  $enc = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($path, $text, $enc)
+}
+
+# ---------------------------------------------------------------- 0. 检查环境
+Step "0/6 检查 wrangler 与登录状态"
+if (-not (Test-Path $TOML)) {
+  throw "找不到 wrangler.toml，请把本脚本放在 server 目录下运行"
+}
+
+$who = Run "npx --yes wrangler@4 whoami"
+if ($who -match 'not authenticated' -or $who -match 'You are not logged in' -or $who -match 'not logged in') {
+  Write-Host "尚未登录 Cloudflare。先执行： npx --yes wrangler@4 login" -ForegroundColor Yellow
+  exit 1
+}
+
+# ---------------------------------------------------------------- 1. D1
+Step "1/6 准备 D1 数据库"
+$tomlText = Get-Content $TOML -Raw
+
+if ($tomlText -match 'REPLACE_ME') {
+  $create = Run "npx --yes wrangler@4 d1 create $D1_NAME"
+  if ($create -match '"database_id"\s*:\s*"([0-9a-fA-F-]{36})"') {
+    $dbId = $Matches[1]
+  } elseif ($create -match 'database_id\s*=\s*"([0-9a-fA-F-]{36})"') {
+    $dbId = $Matches[1]
+  } else {
+    throw "没能从 d1 create 输出里解析出 database_id，请手动填进 wrangler.toml 后重跑"
+  }
+  Write-Host "database_id = $dbId" -ForegroundColor Green
+  $tomlText = $tomlText -replace 'database_id\s*=\s*"[^"]*"', ('database_id = "' + $dbId + '"')
+  Write-Utf8NoBom $TOML $tomlText
+} else {
+  Write-Host "wrangler.toml 里已有 database_id，跳过创建" -ForegroundColor Green
+}
+
+# ---------------------------------------------------------------- 2. 建表
+Step "2/6 建表"
+Run "npx --yes wrangler@4 d1 execute $D1_NAME --remote --file=./schema.sql --yes" | Out-Null
+
+# ---------------------------------------------------------------- 3. API_KEY
+Step "3/6 写入 API_KEY"
+$apiKey = Read-Host "API_KEY（直接回车用默认生成值）"
+if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = $DEFAULT_API_KEY }
+
+$tmpSecrets = Join-Path $PSScriptRoot '.secrets.tmp.json'
+Write-Utf8NoBom $tmpSecrets ((@{ API_KEY = $apiKey } | ConvertTo-Json))
+Run "npx --yes wrangler@4 secret bulk $tmpSecrets" | Out-Null
+Remove-Item $tmpSecrets -Force
+
+# ---------------------------------------------------------------- 4. 首次部署
+Step "4/6 首次部署"
+$deployOut = Run "npx --yes wrangler@4 deploy"
+
+$workerUrl = $null
+if ($deployOut -match '(https://[a-z0-9.-]+\.workers\.dev)') {
+  $workerUrl = $Matches[1]
+}
+if (-not $workerUrl) {
+  throw "没能从 deploy 输出里解析出 workers.dev 地址，请看上面日志"
+}
+Write-Host "Worker 地址：$workerUrl" -ForegroundColor Green
+
+# ---------------------------------------------------------------- 5. 企业微信
+Step "5/6 配置企业微信 Webhook"
+Write-Host "在手机企业微信里：群 → ··· → 群机器人 → 复制 Webhook 地址"
+Write-Host "格式：https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
+$webhook = Read-Host "粘贴 Webhook 地址"
+$webhook = $webhook.Trim()
+if ($webhook -notmatch '^https://qyapi\.weixin\.qq\.com/cgi-bin/webhook/send\?key=') {
+  Write-Host "看起来不像企业微信 Webhook，仍继续写入，稍后用日志排查" -ForegroundColor Yellow
+}
+
+@{ WECOM_WEBHOOK = $webhook } | ConvertTo-Json | ForEach-Object { Write-Utf8NoBom $tmpSecrets $_ }
+Run "npx --yes wrangler@4 secret bulk $tmpSecrets" | Out-Null
+Remove-Item $tmpSecrets -Force
+
+# ---------------------------------------------------------------- 6. 回填域名再部署
+Step "6/6 回填 PUBLIC_BASE_URL 并重新部署"
+$tomlText = Get-Content $TOML -Raw
+$tomlText = $tomlText -replace 'PUBLIC_BASE_URL\s*=\s*"[^"]*"', ('PUBLIC_BASE_URL = "' + $workerUrl + '"')
+Write-Utf8NoBom $TOML $tomlText
+
+Run "npx --yes wrangler@4 deploy" | Out-Null
+
+# ---------------------------------------------------------------- 验活
+Step "验证"
+try {
+  $health = Invoke-RestMethod -Uri "$workerUrl/health" -TimeoutSec 15
+  Write-Host ("/health => " + ($health | ConvertTo-Json -Compress)) -ForegroundColor Green
+} catch {
+  Write-Host "健康检查失败：$($_.Exception.Message)" -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "完成。把下面两项填进 App 设置页：" -ForegroundColor Cyan
+Write-Host "  服务器地址：$workerUrl"
+Write-Host "  API Key ：$apiKey"
