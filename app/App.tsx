@@ -384,17 +384,6 @@ function AppInner() {
     );
   }, []);
 
-  if (!ready) {
-    return (
-      <View style={styles.loading}>
-        <StatusBar style="light" />
-        <ActivityIndicator color={colors.accent} />
-      </View>
-    );
-  }
-
-  const groups = groupReminders(reminders, now);
-
   const monthStats = useMemo(() => {
     const d = new Date(now);
     const start = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
@@ -404,6 +393,19 @@ function AppInner() {
       missed: reminders.filter((item) => item.status === 'missed').length,
     };
   }, [reminders, now]);
+
+  const groups = groupReminders(reminders, now);
+
+  // 注意：所有 hook 必须在任何提前 return 之前调用，否则会触发
+  // "Rendered more hooks than during the previous render"
+  if (!ready) {
+    return (
+      <View style={styles.loading}>
+        <StatusBar style="light" />
+        <ActivityIndicator color={colors.accent} />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.root}>
