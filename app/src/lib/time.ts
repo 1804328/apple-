@@ -82,3 +82,13 @@ export function nextOccurrence(ms: number, repeat: string): number {
   }
   return d.getTime();
 }
+
+/** 保留 base 的时分秒，只替换日期 */
+export function mergeDate(base: Date, date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), base.getHours(), base.getMinutes(), 0, 0);
+}
+
+/** 保留 base 的日期，只替换时分 */
+export function mergeTime(base: Date, time: Date): Date {
+  return new Date(base.getFullYear(), base.getMonth(), base.getDate(), time.getHours(), time.getMinutes(), 0, 0);
+}

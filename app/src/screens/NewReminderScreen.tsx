@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 
 import { colors, radius, spacing } from '../theme';
-import { formatDateTime, stepsForLevel } from '../lib/time';
+import { formatDateTime, mergeDate, mergeTime, stepsForLevel } from '../lib/time';
+import CalendarPicker from '../components/CalendarPicker';
 import type { Reminder, RepeatRule } from '../types';
 
 interface Props {
@@ -192,18 +193,25 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
         </View>
 
         {Platform.OS === 'ios' ? (
-          <DateTimePicker
-            value={fireAt}
-            mode="datetime"
-            display="spinner"
-            locale="zh-CN"
-            themeVariant="dark"
-            textColor={colors.text}
-            onChange={(_event, date) => {
-              if (date) setFireAt(date);
-            }}
-            style={styles.picker}
-          />
+          <>
+            <CalendarPicker
+              value={fireAt}
+              onChange={(date) => setFireAt((prev) => mergeDate(prev, date))}
+            />
+            <View style={styles.timeRow}>
+              <Text style={styles.timeLabel}>时间</Text>
+              <DateTimePicker
+                value={fireAt}
+                mode="time"
+                display="compact"
+                locale="zh-CN"
+                themeVariant="dark"
+                onChange={(_event, date) => {
+                  if (date) setFireAt((prev) => mergeTime(prev, date));
+                }}
+              />
+            </View>
+          </>
         ) : (
           <>
             <Pressable style={styles.androidTime} onPress={() => setShowAndroidPicker(true)}>
@@ -335,6 +343,19 @@ const styles = StyleSheet.create({
   },
   presetText: { color: colors.textDim, fontSize: 13 },
   picker: { alignSelf: 'stretch' },
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  timeLabel: { color: colors.textDim, fontSize: 14 },
   androidTime: {
     backgroundColor: colors.card,
     borderWidth: 1,
