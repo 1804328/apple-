@@ -101,17 +101,39 @@ jobs:
           fi
           echo "scheme: $SCHEME"
 
-          xcodebuild \
-            -workspace "$WORKSPACE" \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath "$GITHUB_WORKSPACE/app/build" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
+          build_once() {
+            xcodebuild \
+              -workspace "$WORKSPACE" \
+              -scheme "$SCHEME" \
+              -configuration Release \
+              -sdk iphoneos \
+              -destination 'generic/platform=iOS' \
+              -derivedDataPath "$GITHUB_WORKSPACE/app/build" \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_IDENTITY="" \
+              build
+          }
+
+          # 首选当前 Xcode；失败则按版本号从新到旧逐个尝试（镜像只为部分 Xcode 预装 iOS 平台）
+          if build_once; then
+            exit 0
+          fi
+          echo "=== 当前 Xcode 构建失败，尝试切换其它 Xcode 重试 ==="
+          xcodebuild -showdestinations -workspace "$WORKSPACE" -scheme "$SCHEME" || true
+
+          for XCODE in $(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -Vr); do
+            echo "--- 尝试 $XCODE ---"
+            sudo xcode-select -s "$XCODE/Contents/Developer"
+            xcodebuild -version
+            if build_once; then
+              echo "=== 使用 $XCODE 构建成功 ==="
+              exit 0
+            fi
+          done
+
+          echo "=== 所有候选 Xcode 均构建失败 ==="
+          exit 1
 
       - name: 打包成未签名 IPA
         working-directory: app
