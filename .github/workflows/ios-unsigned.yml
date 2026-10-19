@@ -1,0 +1,124 @@
+name: Build unsigned IPA
+
+# 免费签名路线（路线 B）：
+# macOS runner 负责编译出未签名的 .ipa，再用 Sideloadly / AltStore 在 Windows 上
+# 用免费 Apple ID 签名安装。不需要 Mac，也不需要 99 美元开发者账号。
+#
+# 用法：推送到 GitHub → Actions 里手动 Run workflow（或 push 到 main 自动触发）
+#      → 跑完在 Artifacts 里下载 strong-reminder-unsigned-ipa
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - '.github/workflows/ios-unsigned.yml'
+
+concurrency:
+  group: ios-unsigned-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: '1'
+  EXPO_NO_TELEMETRY: '1'
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 选择 Xcode 26（AlarmKit 需要 iOS 26 SDK）
+        run: |
+          set -euo pipefail
+          ls -d /Applications/Xcode*.app
+          XCODE="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | head -1)"
+          if [ -z "$XCODE" ]; then
+            XCODE="$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          fi
+          echo "using $XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: 安装依赖
+        working-directory: app
+        run: npm ci
+
+      - name: 生成 iOS 工程（prebuild）
+        working-directory: app
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      - name: CocoaPods
+        working-directory: app/ios
+        run: |
+          set -euo pipefail
+          export LANG=en_US.UTF-8
+          if ! pod install; then
+            echo "第一次 pod install 失败，更新 repo 后重试"
+            pod install --repo-update
+          fi
+
+      - name: 编译未签名 .app
+        working-directory: app/ios
+        run: |
+          set -euo pipefail
+          WORKSPACE="$(ls -d *.xcworkspace | head -1)"
+          echo "workspace: $WORKSPACE"
+          xcodebuild -list -workspace "$WORKSPACE" || true
+
+          SCHEME="$(xcodebuild -list -workspace "$WORKSPACE" 2>/dev/null \
+            | awk '/Schemes:/{flag=1;next} flag && NF {print $1; exit}')"
+          if [ -z "$SCHEME" ]; then
+            echo "无法从 xcodebuild -list 解析出 scheme"
+            exit 1
+          fi
+          echo "scheme: $SCHEME"
+
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$GITHUB_WORKSPACE/app/build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: 打包成未签名 IPA
+        working-directory: app
+        run: |
+          set -euo pipefail
+          APP="$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)"
+          if [ -z "$APP" ]; then
+            echo "没有找到 .app"
+            find build/Build/Products -maxdepth 3 -type d -name '*.app' || true
+            exit 1
+          fi
+          echo "app: $APP"
+          rm -rf Payload unsigned.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry unsigned.ipa Payload
+          ls -lh unsigned.ipa
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: strong-reminder-unsigned-ipa
+          path: app/unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error

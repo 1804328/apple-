@@ -1,0 +1,18 @@
+{
+  "name": "strong-reminder-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "静默提醒云端调度器：到点未确认则按升级链推送微信/短信/语音",
+  "scripts": {
+    "test": "node --test --test-isolation=none test/escalation.test.mjs test/api.test.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute strong-reminder --file=./schema.sql --remote",
+    "db:init:local": "wrangler d1 execute strong-reminder --file=./schema.sql --local",
+    "send:test": "node scripts/dev-send.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

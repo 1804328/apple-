@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "强提醒",
+    "slug": "strong-reminder",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "strongreminder",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "platforms": ["ios", "android"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.legion.strongreminder",
+      "infoPlist": {
+        "NSAlarmKitUsageDescription": "需要创建系统闹钟级提醒，确保重要日期到点必定响铃。"
+      },
+      "config": {
+        "usesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.legion.strongreminder",
+      "permissions": [
+        "POST_NOTIFICATIONS",
+        "SCHEDULE_EXACT_ALARM",
+        "USE_EXACT_ALARM",
+        "USE_FULL_SCREEN_INTENT",
+        "SYSTEM_ALERT_WINDOW",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_SPECIAL_USE",
+        "RECEIVE_BOOT_COMPLETED",
+        "WAKE_LOCK",
+        "VIBRATE",
+        "ACCESS_NOTIFICATION_POLICY"
+      ]
+    },
+    "plugins": ["@react-native-community/datetimepicker"],
+    "extra": {
+      "apiBaseUrl": ""
+    }
+  }
+}

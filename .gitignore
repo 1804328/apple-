@@ -1,0 +1,17 @@
+node_modules/
+.npm-cache/
+.home/
+.expo/
+dist/
+.expo-shared/
+*.log
+.DS_Store
+
+# prebuild 产物：由 CI / 本地 `npx expo prebuild` 生成，不入库
+app/ios/
+app/android/
+
+# 构建产物
+app/build/
+app/Payload/
+*.ipa
