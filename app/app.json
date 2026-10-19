@@ -38,18 +38,7 @@
         "ACCESS_NOTIFICATION_POLICY"
       ]
     },
-    "plugins": [
-      "@react-native-community/datetimepicker",
-      [
-        "expo-splash-screen",
-        {
-          "backgroundColor": "#0B0F14",
-          "image": "./assets/icon.png",
-          "imageWidth": 200,
-          "resizeMode": "contain"
-        }
-      ]
-    ],
+    "plugins": ["@react-native-community/datetimepicker"],
     "extra": {
       "apiBaseUrl": "https://ryanlewis.dpdns.org",
       "apiKey": "829393b8066a414c909e31d611613fad5da083c158e346ccada619c50b788965"
