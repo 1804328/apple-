@@ -83,8 +83,8 @@ export async function runScheduler(env, now = Math.floor(Date.now() / 1000)) {
 
   for (const row of rows) {
     if (shouldMarkMissed(row, now)) {
-      if (row.repeat === 'yearly') {
-        const next = await db.rollYearly(env.DB, row, now);
+      if (row.repeat && row.repeat !== 'none') {
+        const next = await db.rollRepeat(env.DB, row, now);
         log.push({ reminderId: row.id, action: 'rolled', next_fire_at: next });
       } else {
         await db.markMissed(env.DB, row.id, now);
@@ -170,8 +170,8 @@ export default {
       const row = await db.findByAckToken(env.DB, ackMatch[1], now);
       if (!row) return new Response(ackPage(null, false), { status: 410, headers: { 'content-type': 'text/html; charset=utf-8' } });
       let rolledTo = null;
-      if (row.repeat === 'yearly') {
-        rolledTo = await db.rollYearly(env.DB, row, now);
+      if (row.repeat && row.repeat !== 'none') {
+        rolledTo = await db.rollRepeat(env.DB, row, now);
       } else {
         await db.markAcked(env.DB, row.id, now);
       }
@@ -192,6 +192,7 @@ export default {
       const rows = status
         ? await db.listRemindersByStatus(env.DB, status, limit)
         : await db.listReminders(env.DB, limit);
+      const stats = await db.deliveryStats(env.DB);
 
       return json({
         ok: true,
@@ -213,6 +214,8 @@ export default {
             status: row.status,
             created_at: row.created_at,
             acked_at: row.acked_at,
+            push_count: stats.get(row.id)?.pushCount ?? 0,
+            last_push_at: stats.get(row.id)?.lastPushAt ?? null,
             steps,
           };
         }),
@@ -245,8 +248,8 @@ export default {
     const ackApi = pathname.match(/^\/api\/reminders\/([^/]+)\/ack$/);
     if (ackApi && request.method === 'POST') {
       const row = await db.getReminder(env.DB, ackApi[1]);
-      if (row?.repeat === 'yearly') {
-        const next = await db.rollYearly(env.DB, row, now);
+      if (row?.repeat && row.repeat !== 'none') {
+        const next = await db.rollRepeat(env.DB, row, now);
         return json({ ok: true, repeat: 'yearly', rolled_to: next });
       }
       await db.markAcked(env.DB, ackApi[1], now);

@@ -5,7 +5,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -13,7 +12,7 @@ import {
 
 import { colors, radius, spacing } from '../theme';
 import { formatDateTime, stepsForLevel } from '../lib/time';
-import type { Reminder } from '../types';
+import type { Reminder, RepeatRule } from '../types';
 
 interface Props {
   onCancel: () => void;
@@ -26,6 +25,13 @@ const FORCE_OPTIONS = [
   { level: 3, label: '标准', desc: '到点 + 没确认就升级到微信' },
   { level: 4, label: '强力', desc: '多级预警 + 短信兜底' },
   { level: 5, label: '硬核', desc: '一直到你确认为止' },
+];
+
+const REPEAT_OPTIONS: { value: RepeatRule; label: string }[] = [
+  { value: 'none', label: '不重复' },
+  { value: 'weekly', label: '每周' },
+  { value: 'monthly', label: '每月' },
+  { value: 'yearly', label: '每年' },
 ];
 
 const CHANNEL_LABEL: Record<string, string> = {
@@ -95,7 +101,7 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
     initial ? new Date(initial.fireAt) : presetDate('hour'),
   );
   const [forceLevel, setForceLevel] = useState(initial?.forceLevel ?? 3);
-  const [repeatYearly, setRepeatYearly] = useState(initial?.repeat === 'yearly');
+  const [repeat, setRepeat] = useState<RepeatRule>(initial?.repeat ?? 'none');
   const [showAndroidPicker, setShowAndroidPicker] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -126,7 +132,7 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
       fireAt: fireAt.getTime(),
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
       forceLevel,
-      repeat: repeatYearly ? 'yearly' : 'none',
+      repeat,
       steps,
       status: 'pending',
       createdAt: initial?.createdAt ?? Date.now(),
@@ -148,6 +154,7 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
       <ScrollView
         contentContainerStyle={styles.body}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         automaticallyAdjustKeyboardInsets
       >
         <Text style={styles.label}>提醒内容</Text>
@@ -236,18 +243,26 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
           {FORCE_OPTIONS.find((o) => o.level === forceLevel)?.desc}
         </Text>
 
-        <View style={styles.switchRow}>
-          <View style={styles.switchTextWrap}>
-            <Text style={styles.switchLabel}>每年重复</Text>
-            <Text style={styles.switchHint}>生日、结婚纪念日选这个；确认后自动滚到明年</Text>
-          </View>
-          <Switch
-            value={repeatYearly}
-            onValueChange={setRepeatYearly}
-            trackColor={{ false: '#2a3442', true: '#2f5da8' }}
-            thumbColor={repeatYearly ? colors.accent : '#8b9bb0'}
-          />
+        <Text style={styles.label}>重复</Text>
+        <View style={styles.forceRow}>
+          {REPEAT_OPTIONS.map((option) => {
+            const active = option.value === repeat;
+            return (
+              <Pressable
+                key={option.value}
+                style={[styles.forceChip, active && styles.forceChipActive]}
+                onPress={() => setRepeat(option.value)}
+              >
+                <Text style={[styles.forceLabel, active && styles.forceLabelActive]}>{option.label}</Text>
+              </Pressable>
+            );
+          })}
         </View>
+        <Text style={styles.forceDesc}>
+          {repeat === 'none'
+            ? '只提醒这一次'
+            : `完成后自动滚到下一个周期（${repeat === 'weekly' ? '下周' : repeat === 'monthly' ? '下月' : '明年'}同一天）`}
+        </Text>
 
         <Text style={styles.label}>升级链预览</Text>
         <View style={styles.steps}>

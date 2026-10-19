@@ -1,5 +1,8 @@
 export type ReminderStatus = 'pending' | 'acked' | 'done' | 'missed';
 
+/** 重复规则 */
+export type RepeatRule = 'none' | 'weekly' | 'monthly' | 'yearly';
+
 /** 升级链的一步：afterSec 相对到点时间，负数是提前提醒 */
 export interface EscalationStep {
   afterSec: number;
@@ -15,8 +18,12 @@ export interface Reminder {
   tz: string;
   /** 1..6，见 PLAN §1.4 */
   forceLevel: number;
-  /** none | yearly：每年重复（生日/纪念日用） */
-  repeat?: 'none' | 'yearly';
+  /** none | weekly | monthly | yearly */
+  repeat?: RepeatRule;
+  /** 云端成功推送次数（来自服务端统计） */
+  pushCount?: number;
+  /** 最近一次成功推送时间（epoch ms） */
+  lastPushAt?: number;
   steps: EscalationStep[];
   status: ReminderStatus;
   createdAt: number;

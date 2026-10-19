@@ -104,7 +104,11 @@ export default function AnniversaryScreen({ onCancel, onGenerate }: Props) {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
         <Text style={styles.label}>纪念日名称</Text>
         <TextInput
           value={title}

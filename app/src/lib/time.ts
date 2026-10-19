@@ -69,3 +69,16 @@ export function nextYear(ms: number): number {
   d.setFullYear(d.getFullYear() + 1);
   return d.getTime();
 }
+
+/** 按重复规则算下一次触发时间 */
+export function nextOccurrence(ms: number, repeat: string): number {
+  const d = new Date(ms);
+  if (repeat === 'yearly') {
+    d.setFullYear(d.getFullYear() + 1);
+  } else if (repeat === 'monthly') {
+    d.setMonth(d.getMonth() + 1);
+  } else if (repeat === 'weekly') {
+    d.setDate(d.getDate() + 7);
+  }
+  return d.getTime();
+}

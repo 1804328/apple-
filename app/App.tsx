@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, AppState, SafeAreaView, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Notifications from 'expo-notifications';
 
 import ListScreen from './src/screens/ListScreen';
 import NewReminderScreen from './src/screens/NewReminderScreen';
@@ -26,7 +27,7 @@ import {
   scheduleFor,
   setupNotificationHandler,
 } from './src/services/alarms';
-import { nextYear } from './src/lib/time';
+import { nextOccurrence } from './src/lib/time';
 import { ackOnServer, fetchPendingReminders, removeOnServer, syncReminder } from './src/services/api';
 
 type Screen = 'list' | 'new' | 'settings' | 'anniversary';
@@ -47,6 +48,34 @@ export default function App() {
   useEffect(() => {
     remindersRef.current = reminders;
   }, [reminders]);
+
+  const configRef = useRef<ChannelConfig>(config);
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
+  /** 拉云端：补回缺失提醒 + 刷新推送统计 */
+  const mergeCloud = useCallback(async (cfg: ChannelConfig, local: Reminder[]): Promise<Reminder[]> => {
+    const cloud = await fetchPendingReminders(cfg);
+    if (!cloud.ok || !cloud.reminders) return local;
+
+    const byId = new Map(local.map((item) => [item.id, item]));
+    for (const item of cloud.reminders) {
+      const existing = byId.get(item.id);
+      if (existing) {
+        // 只合并推送统计，不覆盖本地编辑
+        byId.set(item.id, {
+          ...existing,
+          pushCount: item.pushCount,
+          lastPushAt: item.lastPushAt,
+        });
+      } else {
+        const alarmIds = await scheduleFor(item).catch(() => [] as string[]);
+        byId.set(item.id, { ...item, alarmIds, syncedAt: Date.now() });
+      }
+    }
+    return [...byId.values()];
+  }, []);
 
   // App 在前台时也要能弹出确认页：每 30 秒的 tick 也会触发检查
   useEffect(() => {
@@ -81,27 +110,18 @@ export default function App() {
 
       if (!storedConfig.syncEnabled) return;
 
-      // 重装 / 重签后本地是空的，从云端把待触发的提醒拉回来
-      const cloud = await fetchPendingReminders(storedConfig);
-      if (!mounted || !cloud.ok || !cloud.reminders) return;
+      // 重装 / 重签后本地是空的：从云端补回缺失提醒，并刷新推送统计
+      const before = current.length;
+      const merged = await mergeCloud(storedConfig, current);
+      if (!mounted || merged.length === current.length) return;
 
-      const localIds = new Set(current.map((item) => item.id));
-      const missing = cloud.reminders.filter((item) => !localIds.has(item.id));
-      if (missing.length === 0) return;
-
-      const restored: Reminder[] = [];
-      for (const item of missing) {
-        const alarmIds = await scheduleFor(item).catch(() => [] as string[]);
-        restored.push({ ...item, alarmIds, syncedAt: Date.now() });
-      }
-
-      current = [...current, ...restored];
+      current = merged;
       await saveReminders(current);
       if (!mounted) return;
       setReminders(current);
       remindersRef.current = current;
       setOverdue(findOverduePending(current));
-      Alert.alert('已从云端恢复提醒', `恢复了 ${restored.length} 条（重装或重签后会自动同步）。`);
+      Alert.alert('已从云端恢复提醒', `恢复了 ${current.length - before} 条（重装或重签后会自动同步）。`);
     })();
 
     const sub = AppState.addEventListener('change', (state) => {
@@ -109,6 +129,17 @@ export default function App() {
       setNow(Date.now());
       const next = findOverduePending(remindersRef.current);
       if (next) setOverdue(next);
+
+      // 回到前台顺手刷新云端状态（推送次数 / 其他设备改动）
+      if (configRef.current.syncEnabled) {
+        mergeCloud(configRef.current, remindersRef.current)
+          .then((merged) => {
+            setReminders(merged);
+            remindersRef.current = merged;
+            saveReminders(merged);
+          })
+          .catch(() => undefined);
+      }
     });
 
     return () => {
@@ -116,6 +147,29 @@ export default function App() {
       clearInterval(timer);
       sub.remove();
     };
+  }, []);
+
+  // 点通知直接弹出对应提醒的确认页（而不是只打开 App）
+  useEffect(() => {
+    const openFromNotification = (id?: string) => {
+      if (!id) return;
+      const target = remindersRef.current.find((item) => item.id === id);
+      if (target && target.status === 'pending') setOverdue(target);
+    };
+
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as { reminderId?: string } | undefined;
+      openFromNotification(data?.reminderId);
+    });
+
+    Notifications.getLastNotificationResponseAsync?.()
+      .then((response) => {
+        const data = response?.notification.request.content.data as { reminderId?: string } | undefined;
+        openFromNotification(data?.reminderId);
+      })
+      .catch(() => undefined);
+
+    return () => sub.remove();
   }, []);
 
   const persist = useCallback(async (next: Reminder[]) => {
@@ -195,10 +249,10 @@ export default function App() {
 
   const handleAck = useCallback(
     async (reminder: Reminder) => {
-      // 每年重复：不落成"已完成"，而是滚到明年同一天继续提醒
-      if (reminder.repeat === 'yearly') {
+      // 重复提醒：不落成「已完成」，而是滚到下一周期继续提醒
+      if (reminder.repeat && reminder.repeat !== 'none') {
         await cancelFor(reminder.alarmIds ?? []);
-        const fireAt = nextYear(reminder.fireAt);
+        const fireAt = nextOccurrence(reminder.fireAt, reminder.repeat);
         const rolled: Reminder = { ...reminder, fireAt, status: 'pending', ackedAt: undefined, alarmIds: [] };
         const alarmIds = await scheduleFor(rolled).catch(() => [] as string[]);
         const saved: Reminder = { ...rolled, alarmIds, syncedAt: Date.now() };
@@ -208,7 +262,7 @@ export default function App() {
         if (config.syncEnabled) {
           await syncReminder(config, saved);
         }
-        Alert.alert('明年的提醒已排好', `「${reminder.title}」已滚到明年同一天。`);
+        Alert.alert('下一次的提醒已排好', `「${reminder.title}」已滚到下一个周期。`);
         return;
       }
 
@@ -314,6 +368,16 @@ export default function App() {
 
   const groups = groupReminders(reminders, now);
 
+  const monthStats = useMemo(() => {
+    const d = new Date(now);
+    const start = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+    return {
+      created: reminders.filter((item) => item.createdAt >= start).length,
+      acked: reminders.filter((item) => item.status === 'acked' && (item.ackedAt ?? 0) >= start).length,
+      missed: reminders.filter((item) => item.status === 'missed').length,
+    };
+  }, [reminders, now]);
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
@@ -362,6 +426,7 @@ export default function App() {
         <SettingsScreen
           config={config}
           alarmKitAvailable={alarmKitAvailable}
+          stats={monthStats}
           onSave={handleSaveConfig}
           onBack={() => setScreen('list')}
           onRequestPermissions={handleRequestPermissions}

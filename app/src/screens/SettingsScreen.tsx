@@ -12,11 +12,12 @@ import {
 
 import { colors, radius, spacing } from '../theme';
 import type { ChannelConfig } from '../types';
-import { checkHealth } from '../services/api';
+import { checkHealth, testChannel } from '../services/api';
 
 interface Props {
   config: ChannelConfig;
   alarmKitAvailable: boolean;
+  stats: { created: number; acked: number; missed: number };
   onSave: (config: ChannelConfig) => void;
   onBack: () => void;
   onRequestPermissions: () => void;
@@ -25,6 +26,7 @@ interface Props {
 export default function SettingsScreen({
   config,
   alarmKitAvailable,
+  stats,
   onSave,
   onBack,
   onRequestPermissions,
@@ -33,12 +35,26 @@ export default function SettingsScreen({
   const [apiKey, setApiKey] = useState(config.apiKey);
   const [syncEnabled, setSyncEnabled] = useState(config.syncEnabled);
   const [testing, setTesting] = useState(false);
+  const [testingChannel, setTestingChannel] = useState(false);
 
   async function testConnection() {
     setTesting(true);
     const result = await checkHealth({ apiBaseUrl, apiKey, syncEnabled: true });
     setTesting(false);
     Alert.alert(result.ok ? '连接成功' : '连接失败', result.ok ? '服务器可达。' : result.error ?? '未知错误');
+  }
+
+  async function testWechat() {
+    setTestingChannel(true);
+    const result = await testChannel({ apiBaseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim(), syncEnabled: true });
+    setTestingChannel(false);
+    if (result.skipped) {
+      Alert.alert('通道未启用', result.error ?? '服务端没有配置微信通道');
+    } else if (result.ok) {
+      Alert.alert('已发送', '服务端已通过微信通道发出一条测试消息，去企业微信看看。');
+    } else {
+      Alert.alert('通道异常', result.error ?? '未知错误');
+    }
   }
 
   function save() {
@@ -104,6 +120,12 @@ export default function SettingsScreen({
           <Text style={styles.secondaryText}>{testing ? '测试中…' : '测试连接'}</Text>
         </Pressable>
 
+        <Pressable style={styles.secondaryButton} onPress={testWechat} disabled={testingChannel}>
+          <Text style={styles.secondaryText}>
+            {testingChannel ? '发送中…' : '通道自检（让服务器发一条微信）'}
+          </Text>
+        </Pressable>
+
         <Text style={styles.section}>系统权限</Text>
         <View style={styles.statusRow}>
           <Text style={styles.statusLabel}>闹钟级提醒（AlarmKit）</Text>
@@ -121,10 +143,26 @@ export default function SettingsScreen({
           <Text style={styles.secondaryText}>重新申请权限</Text>
         </Pressable>
 
+        <Text style={styles.section}>本月</Text>
+        <View style={styles.statusRow}>
+          <Text style={styles.statusLabel}>新建</Text>
+          <Text style={styles.statusValue}>{stats.created} 条</Text>
+        </View>
+        <View style={styles.statusRow}>
+          <Text style={styles.statusLabel}>已确认</Text>
+          <Text style={[styles.statusValue, { color: colors.ok }]}>{stats.acked} 条</Text>
+        </View>
+        <View style={styles.statusRow}>
+          <Text style={styles.statusLabel}>错过的提醒（累计）</Text>
+          <Text style={[styles.statusValue, { color: stats.missed > 0 ? colors.warn : colors.textDim }]}>
+            {stats.missed} 条
+          </Text>
+        </View>
+
         <Text style={styles.section}>关于</Text>
         <Text style={styles.about}>
           强提醒 v0.1.0{'\n'}
-          设定日期 → 到点闹钟级响铃 → 没确认就升级到微信/短信 → 点链接即确认。
+          设定日期 → 到点闹钟级响铃 → 没确认就升级到微信 → 点链接即确认。
         </Text>
       </ScrollView>
     </View>

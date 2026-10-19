@@ -113,6 +113,24 @@ export async function listRemindersByStatus(db, status = 'pending', limit = 100)
   return results ?? [];
 }
 
+/** 每条提醒的成功投递统计：用于在列表里显示「已推送 N 次 · 最近时间」 */
+export async function deliveryStats(db) {
+  const { results } = await db
+    .prepare(
+      `SELECT reminder_id, COUNT(*) AS push_count, MAX(attempted_at) AS last_push_at
+         FROM deliveries WHERE ok = 1 GROUP BY reminder_id`,
+    )
+    .all();
+  const map = new Map();
+  for (const row of results ?? []) {
+    map.set(row.reminder_id, {
+      pushCount: Number(row.push_count),
+      lastPushAt: Number(row.last_push_at),
+    });
+  }
+  return map;
+}
+
 /**
  * App 创建/编辑提醒时同步上来。id 由 App 生成（本地优先）。
  * @returns {Promise<{id:string, ack_token:string}>}
@@ -186,13 +204,28 @@ function timezoneOffsetMs(date, timeZone) {
   return asUTC - date.getTime();
 }
 
-/** 下一年同一时刻（按提醒自己的时区算，闰年不会漂） */
-export function nextYearEpoch(epochSec, tz = 'Asia/Shanghai') {
+/** 下一次重复时刻（按提醒自己的时区算，闰年/月末不会漂） */
+export function nextRepeatEpoch(epochSec, tz = 'Asia/Shanghai', repeat = 'yearly') {
   try {
     const date = new Date(epochSec * 1000);
     const offset = timezoneOffsetMs(date, tz);
     const local = new Date(date.getTime() + offset);
-    local.setUTCFullYear(local.getUTCFullYear() + 1);
+
+    if (repeat === 'yearly') {
+      local.setUTCFullYear(local.getUTCFullYear() + 1);
+    } else if (repeat === 'monthly') {
+      const day = local.getUTCDate();
+      local.setUTCDate(1);
+      local.setUTCMonth(local.getUTCMonth() + 1);
+      // 月末对齐：1/31 + 1 月 → 2/28（而不是滚到 3/3）
+      const lastDay = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth() + 1, 0)).getUTCDate();
+      local.setUTCDate(Math.min(day, lastDay));
+    } else if (repeat === 'weekly') {
+      local.setUTCDate(local.getUTCDate() + 7);
+    } else {
+      return epochSec + 365 * 86400;
+    }
+
     return Math.floor((local.getTime() - offset) / 1000);
   } catch {
     return epochSec + 365 * 86400;
@@ -200,12 +233,13 @@ export function nextYearEpoch(epochSec, tz = 'Asia/Shanghai') {
 }
 
 /**
- * 每年重复的提醒「完成/错过」后滚到明年：重置为 pending、清空本周期投递记录，
- * 这样即使 App 没装，服务器也会继续按年提醒。
+ * 重复提醒「完成/错过」后滚到下一周期：重置为 pending、清空本周期投递记录，
+ * 这样即使 App 没装，服务器也会继续按周期提醒。
  * @returns {Promise<number>} 新的 fire_at（epoch 秒）
  */
-export async function rollYearly(db, row, now) {
-  const next = nextYearEpoch(Number(row.fire_at), row.tz);
+export async function rollRepeat(db, row, now) {
+  const repeat = row.repeat === 'yearly' || row.repeat === 'monthly' || row.repeat === 'weekly' ? row.repeat : 'yearly';
+  const next = nextRepeatEpoch(Number(row.fire_at), row.tz, repeat);
   const ackExp = Math.max(next + 86400, now + 7 * 86400);
   await db
     .prepare(

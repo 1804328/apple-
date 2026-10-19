@@ -20,6 +20,12 @@ interface Props {
   onOpenAnniversary: () => void;
 }
 
+const REPEAT_LABEL: Record<string, string> = {
+  weekly: '每周',
+  monthly: '每月',
+  yearly: '每年',
+};
+
 const FORCE_LABEL: Record<number, string> = {
   1: '轻提醒',
   2: '单次',
@@ -70,7 +76,12 @@ function ReminderCard({
             {overdue ? '已到点' : formatCountdown(reminder.fireAt, now)}
           </Text>
         ) : null}
-        {reminder.repeat === 'yearly' ? <Text style={styles.metaRepeat}>每年</Text> : null}
+        {reminder.repeat && reminder.repeat !== 'none' ? (
+          <Text style={styles.metaRepeat}>{REPEAT_LABEL[reminder.repeat] ?? ''}</Text>
+        ) : null}
+        {reminder.pushCount ? (
+          <Text style={styles.metaPush}>已推送 {reminder.pushCount} 次</Text>
+        ) : null}
         {syncEnabled && reminder.syncedAt ? <Text style={styles.metaSynced}>云端已登记</Text> : null}
       </View>
 
@@ -321,6 +332,7 @@ const styles = StyleSheet.create({
   metaCountdown: { color: colors.accent, fontSize: 13, fontWeight: '600' },
   metaOverdue: { color: colors.danger },
   metaRepeat: { color: '#9dc0ff', fontSize: 11 },
+  metaPush: { color: colors.warn, fontSize: 11 },
   metaSynced: { color: colors.ok, fontSize: 11, marginLeft: 'auto' },
   note: { color: colors.textFaint, fontSize: 13, marginTop: spacing.xs, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },

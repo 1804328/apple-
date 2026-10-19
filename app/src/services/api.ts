@@ -1,4 +1,8 @@
-import type { ChannelConfig, Reminder } from '../types';
+import type { ChannelConfig, Reminder, RepeatRule } from '../types';
+
+function normalizeRepeat(value?: string): RepeatRule {
+  return value === 'weekly' || value === 'monthly' || value === 'yearly' ? value : 'none';
+}
 
 export interface ApiResult {
   ok: boolean;
@@ -68,7 +72,9 @@ interface CloudReminderRow {
   fire_at: number;
   tz?: string;
   force_level?: number;
-  repeat?: 'none' | 'yearly';
+  repeat?: string;
+  push_count?: number;
+  last_push_at?: number | null;
   created_at: number;
   steps?: { after_sec?: number; afterSec?: number; channels?: string[] }[];
 }
@@ -81,7 +87,9 @@ function rowToReminder(row: CloudReminderRow): Reminder {
     fireAt: Number(row.fire_at) * 1000,
     tz: row.tz ?? 'Asia/Shanghai',
     forceLevel: Number(row.force_level ?? 3),
-    repeat: row.repeat === 'yearly' ? 'yearly' : 'none',
+    repeat: normalizeRepeat(row.repeat),
+    pushCount: Number(row.push_count ?? 0),
+    lastPushAt: row.last_push_at ? Number(row.last_push_at) * 1000 : undefined,
     steps: (row.steps ?? []).map((step) => ({
       afterSec: Number(step.after_sec ?? step.afterSec ?? 0),
       channels: Array.isArray(step.channels) ? step.channels : [],
@@ -121,6 +129,25 @@ export async function checkHealth(cfg: ChannelConfig): Promise<ApiResult> {
     const res = await fetch(`${base(cfg)}/health`);
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** 让服务端用当前配置的微信通道发一条测试消息 */
+export async function testChannel(cfg: ChannelConfig): Promise<{ ok: boolean; error?: string; skipped?: boolean }> {
+  if (!enabled(cfg)) return { ok: false, error: '未开启云端升级' };
+  try {
+    const res = await fetch(`${base(cfg)}/api/test`, { method: 'POST', headers: headers(cfg) });
+    const data = (await res.json().catch(() => null)) as
+      | { ok?: boolean; error?: string | null; skipped?: boolean }
+      | null;
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    return {
+      ok: Boolean(data?.ok),
+      skipped: Boolean(data?.skipped),
+      error: data?.error ?? undefined,
+    };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
