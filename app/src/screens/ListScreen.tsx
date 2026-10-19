@@ -57,46 +57,112 @@ function iconFor(reminder: Reminder): string {
   return '📌';
 }
 
-function LongRow({
-  reminder,
+interface LongGroup {
+  key: string;
+  title: string;
+  icon: string;
+  items: Reminder[];
+}
+
+/** 同系列折叠：农历生日的 5 年、纪念日的多个里程碑，归成一行 */
+function groupKeyOf(item: Reminder): string {
+  if (item.id.startsWith('lunar-')) return item.id.replace(/-\d+$/, '');
+  if (item.id.startsWith('anniv-')) return item.id.replace(/-\d+$/, '');
+  return `one:${item.id}`;
+}
+
+function buildLongGroups(list: Reminder[]): LongGroup[] {
+  const map = new Map<string, LongGroup>();
+
+  for (const item of list) {
+    const key = groupKeyOf(item);
+    const existing = map.get(key);
+    if (existing) {
+      existing.items.push(item);
+    } else {
+      map.set(key, {
+        key,
+        title: item.title.replace(/\s*·\s*[^·]+$/, ''),
+        icon: iconFor(item),
+        items: [item],
+      });
+    }
+  }
+
+  return [...map.values()]
+    .map((group) => ({ ...group, items: [...group.items].sort((a, b) => a.fireAt - b.fireAt) }))
+    .sort((a, b) => a.items[0].fireAt - b.items[0].fireAt);
+}
+
+function LongGroupRow({
+  group,
+  expanded,
   now,
+  onToggle,
   onEdit,
   onDelete,
 }: {
-  reminder: Reminder;
+  group: LongGroup;
+  expanded: boolean;
   now: number;
+  onToggle: (key: string) => void;
   onEdit: (r: Reminder) => void;
   onDelete: (r: Reminder) => void;
 }) {
-  const repeat = repeatLabel(reminder);
+  const first = group.items[0];
+  const count = group.items.length;
+  const repeat = repeatLabel(first);
+
   return (
-    <Pressable
-      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-      onPress={() => onEdit(reminder)}
-    >
-      <View style={styles.rowIconWrap}>
-        <Text style={styles.rowIcon}>{iconFor(reminder)}</Text>
-      </View>
-      <View style={styles.rowBody}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {reminder.title}
-        </Text>
-        <Text style={styles.rowMeta} numberOfLines={1}>
-          {formatFireLabel(reminder.fireAt, now)}
-          {repeat ? ` · ${repeat}` : ''}
-          {pendingCountdown(reminder, now)}
-        </Text>
-      </View>
+    <View>
       <Pressable
-        hitSlop={8}
-        onPress={(event) => {
-          event.stopPropagation();
-          onDelete(reminder);
-        }}
+        style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+        onPress={() => (count > 1 ? onToggle(group.key) : onEdit(first))}
       >
-        <Text style={styles.rowDelete}>删除</Text>
+        <View style={styles.rowIconWrap}>
+          <Text style={styles.rowIcon}>{group.icon}</Text>
+        </View>
+        <View style={styles.rowBody}>
+          <Text style={styles.rowTitle} numberOfLines={1}>
+            {group.title}
+          </Text>
+          <Text style={styles.rowMeta} numberOfLines={1}>
+            {formatFireLabel(first.fireAt, now)}
+            {repeat ? ` · ${repeat}` : ''}
+            {pendingCountdown(first, now)}
+          </Text>
+        </View>
+        {count > 1 ? <Text style={styles.rowCount}>{count} 次</Text> : null}
+        {count > 1 ? (
+          <Text style={styles.rowCaret}>{expanded ? '▲' : '▼'}</Text>
+        ) : (
+          <Pressable
+            hitSlop={8}
+            onPress={(event) => {
+              event.stopPropagation();
+              onDelete(first);
+            }}
+          >
+            <Text style={styles.rowDelete}>删除</Text>
+          </Pressable>
+        )}
       </Pressable>
-    </Pressable>
+
+      {expanded && count > 1
+        ? group.items.map((item) => (
+            <View key={item.id} style={styles.subRow}>
+              <Text style={styles.subDate}>{formatFireLabel(item.fireAt, now)}</Text>
+              <Text style={styles.subMeta}>还有 {formatCountdown(item.fireAt, now)}</Text>
+              <Pressable hitSlop={8} onPress={() => onEdit(item)}>
+                <Text style={styles.subAction}>编辑</Text>
+              </Pressable>
+              <Pressable hitSlop={8} onPress={() => onDelete(item)}>
+                <Text style={styles.subDelete}>删除</Text>
+              </Pressable>
+            </View>
+          ))
+        : null}
+    </View>
   );
 }
 
@@ -242,6 +308,17 @@ export default function ListScreen({
   onOpenAnniversary,
 }: Props) {
   const [tab, setTab] = React.useState<Tab>('near');
+  const [expandedGroups, setExpandedGroups] = React.useState<Set<string>>(new Set());
+  const longGroups = React.useMemo(() => buildLongGroups(longList), [longList]);
+
+  const toggleGroup = (key: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const nearPending =
     nearGroups.overdue.length + nearGroups.today.length + nearGroups.later.length;
@@ -392,11 +469,13 @@ export default function ListScreen({
               </View>
             ) : (
               <Section label="30 天以后 / 重复提醒">
-                {longList.map((item) => (
-                  <LongRow
-                    key={item.id}
-                    reminder={item}
+                {longGroups.map((group) => (
+                  <LongGroupRow
+                    key={group.key}
+                    group={group}
+                    expanded={expandedGroups.has(group.key)}
                     now={now}
+                    onToggle={toggleGroup}
                     onEdit={onEdit}
                     onDelete={onDelete}
                   />
@@ -500,6 +579,21 @@ const styles = StyleSheet.create({
   rowTitle: { color: colors.text, fontSize: 15, fontWeight: '600' },
   rowMeta: { color: colors.textDim, fontSize: 12, marginTop: 2 },
   rowDelete: { color: colors.textFaint, fontSize: 12, paddingLeft: spacing.md },
+  rowCount: { color: colors.accentText, fontSize: 11, marginLeft: spacing.sm },
+  rowCaret: { color: colors.textFaint, fontSize: 9, marginLeft: spacing.sm, width: 10, textAlign: 'right' },
+  subRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingLeft: 58,
+    paddingRight: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  subDate: { color: colors.text, fontSize: 13, flex: 1 },
+  subMeta: { color: colors.textDim, fontSize: 11, marginRight: spacing.sm },
+  subAction: { color: colors.accentText, fontSize: 12, paddingHorizontal: spacing.sm },
+  subDelete: { color: colors.textFaint, fontSize: 12, paddingLeft: spacing.sm },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
