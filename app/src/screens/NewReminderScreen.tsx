@@ -5,6 +5,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -103,6 +104,7 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
   );
   const [forceLevel, setForceLevel] = useState(initial?.forceLevel ?? 3);
   const [repeat, setRepeat] = useState<RepeatRule>(initial?.repeat ?? 'none');
+  const [hardcore, setHardcore] = useState(initial?.unlock === 'math');
   const [showAndroidPicker, setShowAndroidPicker] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -134,6 +136,7 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
       forceLevel,
       repeat,
+      unlock: hardcore ? 'math' : 'none',
       steps,
       status: 'pending',
       createdAt: initial?.createdAt ?? Date.now(),
@@ -271,6 +274,21 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
             ? '只提醒这一次'
             : `完成后自动滚到下一个周期（${repeat === 'weekly' ? '下周' : repeat === 'monthly' ? '下月' : '明年'}同一天）`}
         </Text>
+
+        <View style={styles.switchRow}>
+          <View style={styles.switchTextWrap}>
+            <Text style={styles.switchLabel}>强制模式（数学题解锁）</Text>
+            <Text style={styles.switchHint}>
+              到点后连环响铃，必须在 App 里做对 3 道题才能确认
+            </Text>
+          </View>
+          <Switch
+            value={hardcore}
+            onValueChange={setHardcore}
+            trackColor={{ false: '#2a3442', true: '#2f5da8' }}
+            thumbColor={hardcore ? colors.accent : '#8b9bb0'}
+          />
+        </View>
 
         <Text style={styles.label}>升级链预览</Text>
         <View style={styles.steps}>

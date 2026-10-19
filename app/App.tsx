@@ -8,6 +8,7 @@ import NewReminderScreen from './src/screens/NewReminderScreen';
 import AnniversaryScreen from './src/screens/AnniversaryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import OverdueScreen from './src/screens/OverdueScreen';
+import MathChallengeScreen from './src/screens/MathChallengeScreen';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { colors } from './src/theme';
 import type { ChannelConfig, Reminder } from './src/types';
@@ -95,7 +96,7 @@ function AppInner() {
   useEffect(() => {
     if (!ready || screen === 'new') return;
     const next = findOverduePending(remindersRef.current, now);
-    if (next) setOverdue((prev) => prev ?? next);
+    if (next && !skippedIdsRef.current.has(next.id)) setOverdue((prev) => prev ?? next);
   }, [now, ready, screen]);
 
   useEffect(() => {
@@ -147,7 +148,7 @@ function AppInner() {
       if (state !== 'active') return;
       setNow(Date.now());
       const next = findOverduePending(remindersRef.current);
-      if (next) setOverdue(next);
+      if (next && !skippedIdsRef.current.has(next.id)) setOverdue(next);
 
       // 回到前台顺手刷新云端状态（推送次数 / 其他设备改动）
       if (configRef.current.syncEnabled) {
@@ -224,6 +225,8 @@ function AppInner() {
   }, []);
 
   const actionLockRef = useRef<Set<string>>(new Set());
+  /** 用户主动跳过的强制提醒（不标记完成，云端继续催） */
+  const skippedIdsRef = useRef<Set<string>>(new Set());
 
   /** 同一操作执行期间忽略重复触发：防连点重复排闹钟 / 重复请求 */
   const runExclusive = useCallback(async (key: string, fn: () => Promise<void>) => {
@@ -327,6 +330,7 @@ function AppInner() {
     (reminder: Reminder) =>
       runExclusive(`ack:${reminder.id}`, async () => {
         const list = remindersRef.current;
+        skippedIdsRef.current.delete(reminder.id);
 
         // 重复提醒：不落成「已完成」，而是滚到下一周期继续提醒
         if (reminder.repeat && reminder.repeat !== 'none') {
@@ -574,7 +578,18 @@ function AppInner() {
 
       {overdue ? (
         <View style={styles.overlay}>
-          <OverdueScreen reminder={overdue} onDone={handleAck} onSnooze={handleSnooze} />
+          {overdue.unlock === 'math' ? (
+            <MathChallengeScreen
+              reminder={overdue}
+              onSolved={handleAck}
+              onEscape={() => {
+                skippedIdsRef.current.add(overdue.id);
+                setOverdue(null);
+              }}
+            />
+          ) : (
+            <OverdueScreen reminder={overdue} onDone={handleAck} onSnooze={handleSnooze} />
+          )}
         </View>
       ) : null}
     </SafeAreaView>

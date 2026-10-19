@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS reminders (
   steps         TEXT NOT NULL,                 -- JSON: [{after_sec, channels}]
   force_level   INTEGER NOT NULL DEFAULT 3,    -- 1..6，见 PLAN §1.4
   repeat        TEXT NOT NULL DEFAULT 'none',  -- none | yearly
+  unlock        TEXT NOT NULL DEFAULT 'none',  -- none | math
   status        TEXT NOT NULL DEFAULT 'pending', -- pending | acked | done | missed
   acked_at      INTEGER,
   ack_token     TEXT NOT NULL,

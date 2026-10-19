@@ -140,13 +140,14 @@ export async function upsertReminder(db, payload, now) {
   const ackToken = existing?.ack_token ?? newAckToken();
   const ackExp = Math.max(Number(payload.fire_at) + 86400, now + 7 * 86400);
   const repeat = payload.repeat === 'yearly' ? 'yearly' : 'none';
+  const unlock = payload.unlock === 'math' ? 'math' : 'none';
 
   await db
     .prepare(
       `INSERT INTO reminders
-         (id, user_id, title, note, fire_at, tz, steps, force_level, repeat, status,
+         (id, user_id, title, note, fire_at, tz, steps, force_level, repeat, unlock, status,
           acked_at, ack_token, ack_token_exp, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          note = excluded.note,
@@ -155,6 +156,7 @@ export async function upsertReminder(db, payload, now) {
          steps = excluded.steps,
          force_level = excluded.force_level,
          repeat = excluded.repeat,
+         unlock = excluded.unlock,
          status = 'pending',
          acked_at = NULL,
          ack_token_exp = excluded.ack_token_exp,
@@ -170,6 +172,7 @@ export async function upsertReminder(db, payload, now) {
       JSON.stringify(payload.steps ?? []),
       Number(payload.force_level ?? 3),
       repeat,
+      unlock,
       ackToken,
       ackExp,
       existing?.created_at ?? now,

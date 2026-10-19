@@ -147,34 +147,64 @@ export async function scheduleFor(reminder: Reminder): Promise<string[]> {
     ids.push(id);
   }
 
-  // 2) 到点：AlarmKit fixed 闹钟
-  let scheduledAlarmKit = false;
-  if (alarmKitAvailable && manager && factory && reminder.fireAt > Date.now()) {
-    try {
-      const configuration = factory.alarm({
-        // date 单位是毫秒（原生层 /1000 转成 Date）
-        schedule: { type: 'fixed', date: reminder.fireAt },
-        attributes: {
-          presentation: {
-            // 只放 alert：countdown / paused 两套 presentation 需要额外的
-            // Widget Extension，没有它系统可能直接忽略闹钟（见封装库 README）。
-            // snooze（secondaryButton）同样依赖 widget，先用最可靠的"只有停止键"。
-            alert: {
-              title: reminder.title.slice(0, 20),
-              stopButton: { text: '完成', textColor: '#ffffff', systemImageName: 'checkmark.circle.fill' },
-            },
+  // 2) 到点：AlarmKit fixed 闹钟（强制模式再排 +2/+4/+6 分钟的连环闹钟）
+  const buildAlarmConfig = (at: number) =>
+    factory!.alarm({
+      // date 单位是毫秒（原生层 /1000 转成 Date）
+      schedule: { type: 'fixed', date: at },
+      attributes: {
+        presentation: {
+          // 只放 alert：countdown / paused 两套 presentation 需要额外的
+          // Widget Extension，没有它系统可能直接忽略闹钟（见封装库 README）。
+          alert: {
+            title: reminder.title.slice(0, 20),
+            stopButton: { text: '完成', textColor: '#ffffff', systemImageName: 'checkmark.circle.fill' },
           },
-          tintColor: '#ff5c5c',
-          metadata: { reminderId: reminder.id },
         },
-      });
-      const alarm = await manager.schedule(uuidv4(), configuration);
+        tintColor: '#ff5c5c',
+        metadata: { reminderId: reminder.id },
+      },
+    });
+
+  const scheduleAlarmAt = async (at: number): Promise<boolean> => {
+    if (!alarmKitAvailable || !manager || !factory || at <= Date.now()) return false;
+    try {
+      const alarm = await manager.schedule(uuidv4(), buildAlarmConfig(at));
       if (alarm?.id) {
         ids.push(`${ALARMKIT_PREFIX}${alarm.id}`);
-        scheduledAlarmKit = true;
+        return true;
       }
     } catch {
       // 额度用尽 / 未授权 / iOS 版本不支持：退回通知
+    }
+    return false;
+  };
+
+  const scheduledAlarmKit = await scheduleAlarmAt(reminder.fireAt);
+
+  // 强制模式：连环闹钟。按停一次，2/4/6 分钟后还会再响，直到在 App 里做对题确认
+  if (reminder.unlock === 'math') {
+    for (const minutes of [2, 4, 6]) {
+      const at = reminder.fireAt + minutes * 60_000;
+      if (at <= Date.now()) continue;
+      const alarmOk = await scheduleAlarmAt(at);
+      if (alarmOk) continue;
+
+      try {
+        const id = await Notifications.scheduleNotificationAsync({
+          content: {
+            title: `还没确认：${reminder.title}`,
+            body: '完成数学题才算确认',
+            sound: true,
+            data: { reminderId: reminder.id },
+            interruptionLevel: 'timeSensitive',
+          } as Notifications.NotificationContentInput,
+          trigger: { type: 'date', date: new Date(at), channelId: 'default' } as unknown as Notifications.NotificationTriggerInput,
+        });
+        ids.push(id);
+      } catch {
+        // ignore
+      }
     }
   }
 

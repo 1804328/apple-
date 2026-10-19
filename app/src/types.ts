@@ -20,6 +20,8 @@ export interface Reminder {
   forceLevel: number;
   /** none | weekly | monthly | yearly */
   repeat?: RepeatRule;
+  /** 强制解锁方式：math = 必须做对数学题才能确认 */
+  unlock?: 'none' | 'math';
   /** 云端成功推送次数（来自服务端统计） */
   pushCount?: number;
   /** 最近一次成功推送时间（epoch ms） */

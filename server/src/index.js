@@ -211,6 +211,7 @@ export default {
             tz: row.tz,
             force_level: row.force_level,
             repeat: row.repeat ?? 'none',
+            unlock: row.unlock ?? 'none',
             status: row.status,
             created_at: row.created_at,
             acked_at: row.acked_at,
