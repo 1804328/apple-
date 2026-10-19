@@ -1,18 +1,28 @@
-# 云端部署清单（Cloudflare Worker + D1 + PushPlus）
+# 云端部署清单（Cloudflare Worker + D1 + 免费微信通道）
 
 目标：让「到点没确认 → 微信催你」这条链跑起来。约 15 分钟。
 
-前置：Cloudflare 账号（免费）、PushPlus token、Node 20+。
+前置：Cloudflare 账号（免费）、一个免费的微信推送通道（见第 0 步）、Node 20+。
 
 ---
 
-## 0. 先拿 PushPlus token
+## 0. 选一个免费的微信通道
 
-1. 手机微信扫码登录 <https://www.pushplus.plus>
-2. 完成**实名认证**（2024 年 8 月起未实名不能调发送接口）
-3. 首页复制 **token**
+PushPlus 的微信渠道 2026 年起已划入会员，个人用不划算。下面两个都免费，二选一。
 
-> 微信渠道实名用户每天 200 次以内免费，个人用足够了。
+### 方案 A：WxPusher（推荐，消息进个人微信）
+
+1. 微信扫码登录 <https://wxpusher.zjiecode.com>
+2. 新建应用 → 复制 **APP_TOKEN**
+3. 扫应用的二维码关注它（或去「用户管理」看你的 UID）
+4. 复制你的 **UID**（形如 `UID_xxxxxx`）
+
+### 方案 B：企业微信群机器人（最省事，进企业微信）
+
+1. 手机装「企业微信」，个人也能免费注册一个企业
+2. 建一个只有自己的群 → 群设置 → **群机器人** → 添加 → 复制 **Webhook 地址**
+
+> Worker 会按 `WXPUSHER_APP_TOKEN` > `WECOM_WEBHOOK` > `PUSHPLUS_TOKEN` 的顺序自动选通道，**只配一个就行**。
 
 ---
 
@@ -51,19 +61,24 @@ npx wrangler d1 execute strong-reminder --remote --file=./schema.sql
 
 ---
 
-## 4. 设置两个密钥
+## 4. 设置密钥
 
 ```powershell
 npx wrangler secret put API_KEY
 ```
 
-粘贴我给你的 API_KEY（不是 PushPlus 的），回车。
+粘贴我给你的 API_KEY，回车。
+
+然后按第 0 步选的通道设置对应 secret（二选一，不用都设）：
 
 ```powershell
-npx wrangler secret put PUSHPLUS_TOKEN
-```
+# 方案 A：WxPusher
+npx wrangler secret put WXPUSHER_APP_TOKEN
+npx wrangler secret put WXPUSHER_UIDS
 
-粘贴 PushPlus token，回车。
+# 方案 B：企业微信群机器人
+npx wrangler secret put WECOM_WEBHOOK
+```
 
 > 密钥不会写进仓库，也不会显示在 Cloudflare 控制台。
 
@@ -138,7 +153,7 @@ curl.exe https://strong-reminder.xxxx.workers.dev/health
 - App 里确认「启用云端升级」是开的、测试连接成功
 - Cloudflare 控制台 → Workers → strong-reminder → Logs，看有没有报错
 - `wrangler secret list` 确认两个 secret 都在
-- 检查 PushPlus 是否实名、token 是否正确（可直接跑 `node scripts/dev-send.mjs "测试"` 验证）
+- 用 `wrangler secret list` 确认 `WXPUSHER_APP_TOKEN` / `WXPUSHER_UIDS`（或 `WECOM_WEBHOOK`）在列表里
 
 ---
 
@@ -149,5 +164,5 @@ curl.exe https://strong-reminder.xxxx.workers.dev/health
 | `npx wrangler login` 浏览器打不开 | 复制终端里的链接手动粘贴到浏览器 |
 | `d1 create` 报重名 | 说明已建过，去控制台查 database_id 填进 toml 即可 |
 | deploy 报 `database_id` 无效 | 检查 toml 里有没有残留的 `REPLACE_ME` |
-| 微信收不到 | 90% 是 PushPlus 没实名或 token 贴错 |
+| 微信收不到 | 检查 secret 名是否写对、WxPusher 是否已扫码关注应用、企业微信机器人是否在该群里 |
 | 到点后没有任何升级 | 检查提醒是否在 App 里成功同步（设置页测试连接） |

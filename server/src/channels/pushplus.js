@@ -1,22 +1,22 @@
 /**
- * PushPlus 通道：把提醒推到你的微信（服务号）。
- * 文档：https://www.pushplus.plus/doc/
- * 免费额度：实名用户微信渠道 < 200 次/天，超出当日暂停。
+ * PushPlus 通道（微信服务号）。
+ * 注意：2026 年起 PushPlus 的微信渠道已划入会员，免费额度不再稳定。
+ * 个人自用建议优先用 WxPusher 或企业微信群机器人（见 wecom.js / wxpusher.js）。
  */
 
 export const name = 'pushplus';
 
 /**
  * @param {object} args
- * @param {string} [args.token]
+ * @param {object} args.env
  * @param {string} args.title
- * @param {string} args.content  支持 HTML
+ * @param {string} args.content
  * @param {string} [args.url]
- * @returns {Promise<{ok: boolean, skipped?: boolean, error?: string, raw?: unknown}>}
  */
-export async function send({ token, title, content, url }) {
+export async function send({ env, title, content, url }) {
+  const token = env.PUSHPLUS_TOKEN;
   if (!token) {
-    return { ok: false, skipped: true, error: 'PUSHPLUS_TOKEN 未配置（wrangler secret put PUSHPLUS_TOKEN）' };
+    return { ok: false, skipped: true, error: 'PUSHPLUS_TOKEN 未配置' };
   }
 
   const res = await fetch('https://www.pushplus.plus/send', {

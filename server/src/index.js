@@ -105,7 +105,7 @@ export async function runScheduler(env, now = Math.floor(Date.now() / 1000)) {
 
         const content = pushContent(env, row, item);
         const result = await sendOnChannel(channel, {
-          token: env.PUSHPLUS_TOKEN,
+          env,
           ...content,
         });
 
