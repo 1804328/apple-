@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,20 +14,36 @@ import {
 import { colors, radius, spacing } from '../theme';
 import type { ChannelConfig } from '../types';
 import { checkHealth, testChannel } from '../services/api';
+import { getPermissionStatus } from '../services/alarms';
 
 interface Props {
   config: ChannelConfig;
   alarmKitAvailable: boolean;
   stats: { created: number; acked: number; missed: number };
+  lastSyncAt?: number;
+  alarmStats: { alarmKit: number; notifications: number; total: number };
+  onAddResignReminder: () => void;
   onSave: (config: ChannelConfig) => void;
   onBack: () => void;
   onRequestPermissions: () => void;
+}
+
+function relativeTime(ts?: number): string {
+  if (!ts) return '从未同步';
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  return `${Math.floor(diff / 86_400_000)} 天前`;
 }
 
 export default function SettingsScreen({
   config,
   alarmKitAvailable,
   stats,
+  lastSyncAt,
+  alarmStats,
+  onAddResignReminder,
   onSave,
   onBack,
   onRequestPermissions,
@@ -36,6 +53,15 @@ export default function SettingsScreen({
   const [syncEnabled, setSyncEnabled] = useState(config.syncEnabled);
   const [testing, setTesting] = useState(false);
   const [testingChannel, setTestingChannel] = useState(false);
+  const [permissions, setPermissions] = useState<{ notifications: boolean; alarmKit: boolean } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    getPermissionStatus()
+      .then(setPermissions)
+      .catch(() => setPermissions(null));
+  }, []);
 
   async function testConnection() {
     setTesting(true);
@@ -126,11 +152,33 @@ export default function SettingsScreen({
           </Text>
         </Pressable>
 
-        <Text style={styles.section}>系统权限</Text>
+        <Text style={styles.section}>系统体检</Text>
+        <View style={styles.statusRow}>
+          <Text style={styles.statusLabel}>通知权限</Text>
+          <Text
+            style={[
+              styles.statusValue,
+              { color: permissions?.notifications ? colors.ok : colors.danger },
+            ]}
+          >
+            {permissions?.notifications ? '已允许' : '未允许'}
+          </Text>
+        </View>
+        {!permissions?.notifications ? (
+          <Pressable style={styles.secondaryButton} onPress={() => Linking.openSettings()}>
+            <Text style={styles.secondaryText}>去系统设置打开通知</Text>
+          </Pressable>
+        ) : null}
+
         <View style={styles.statusRow}>
           <Text style={styles.statusLabel}>闹钟级提醒（AlarmKit）</Text>
-          <Text style={[styles.statusValue, { color: alarmKitAvailable ? colors.ok : colors.warn }]}>
-            {alarmKitAvailable ? '已可用' : '不可用'}
+          <Text
+            style={[
+              styles.statusValue,
+              { color: permissions?.alarmKit ? colors.ok : colors.warn },
+            ]}
+          >
+            {alarmKitAvailable ? (permissions?.alarmKit ? '已允许' : '未允许') : '不可用'}
           </Text>
         </View>
         <Text style={styles.hint}>
@@ -139,9 +187,39 @@ export default function SettingsScreen({
             : '需要 iOS 26+ 且在弹窗里允许。当前只能发普通通知，静音时可能不响。'}
         </Text>
 
+        <View style={styles.statusRow}>
+          <Text style={styles.statusLabel}>已排闹钟</Text>
+          <Text
+            style={[
+              styles.statusValue,
+              { color: alarmStats.alarmKit >= 30 ? colors.warn : colors.text },
+            ]}
+          >
+            {alarmStats.total} 个（系统闹钟 {alarmStats.alarmKit}）
+          </Text>
+        </View>
+        {alarmStats.alarmKit >= 30 ? (
+          <Text style={styles.warnText}>
+            系统闹钟数量接近上限，超出后可能被系统忽略。建议删掉一些不重要的提醒。
+          </Text>
+        ) : null}
+
+        <View style={styles.statusRow}>
+          <Text style={styles.statusLabel}>最近同步</Text>
+          <Text style={styles.statusValue}>{relativeTime(lastSyncAt)}</Text>
+        </View>
+
         <Pressable style={styles.secondaryButton} onPress={onRequestPermissions}>
           <Text style={styles.secondaryText}>重新申请权限</Text>
         </Pressable>
+
+        <Text style={styles.section}>维护</Text>
+        <Pressable style={styles.secondaryButton} onPress={onAddResignReminder}>
+          <Text style={styles.secondaryText}>添加「每周重签」提醒</Text>
+        </Pressable>
+        <Text style={styles.hint}>
+          免费签名 7 天到期，到期后 App 打不开、提醒全部失效。建议设一条每周提醒自己重签。
+        </Text>
 
         <Text style={styles.section}>本月</Text>
         <View style={styles.statusRow}>
@@ -192,6 +270,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   hint: { color: colors.textFaint, fontSize: 12, lineHeight: 18, marginBottom: spacing.sm },
+  warnText: { color: colors.warn, fontSize: 12, lineHeight: 18, marginBottom: spacing.sm },
   label: { color: colors.textFaint, fontSize: 12, marginTop: spacing.md, marginBottom: 6 },
   input: {
     backgroundColor: colors.card,

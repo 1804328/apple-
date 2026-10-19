@@ -17,6 +17,7 @@ const isIOS = Platform.OS === 'ios';
 type AlarmKitApi = {
   isSupported: boolean;
   requestAuthorization: () => Promise<boolean>;
+  getAuthorizationState?: () => Promise<'notDetermined' | 'authorized' | 'denied'>;
   cancel: (id: string) => Promise<boolean>;
   schedule: (id: string, configuration: unknown) => Promise<{ id: string } | null>;
 };
@@ -71,6 +72,29 @@ export async function requestPermissions(): Promise<{ notifications: boolean; al
       alarmKit = false;
     }
   }
+  return { notifications, alarmKit };
+}
+
+/** 只查询当前权限状态，不弹窗（用于设置页体检） */
+export async function getPermissionStatus(): Promise<{ notifications: boolean; alarmKit: boolean }> {
+  let notifications = false;
+  try {
+    const current = await Notifications.getPermissionsAsync();
+    notifications = Boolean(current.granted);
+  } catch {
+    notifications = false;
+  }
+
+  let alarmKit = false;
+  if (alarmKitAvailable && manager) {
+    try {
+      const state = manager.getAuthorizationState ? await manager.getAuthorizationState() : undefined;
+      alarmKit = state === 'authorized';
+    } catch {
+      alarmKit = false;
+    }
+  }
+
   return { notifications, alarmKit };
 }
 

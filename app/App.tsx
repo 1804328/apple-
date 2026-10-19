@@ -17,8 +17,10 @@ import {
   getSignInfo,
   groupReminders,
   loadConfig,
+  loadLastSync,
   loadReminders,
   saveConfig,
+  saveLastSync,
   saveReminders,
 } from './src/store/reminders';
 import {
@@ -28,7 +30,7 @@ import {
   scheduleFor,
   setupNotificationHandler,
 } from './src/services/alarms';
-import { nextOccurrence } from './src/lib/time';
+import { nextOccurrence, stepsForLevel } from './src/lib/time';
 import { ackOnServer, fetchPendingReminders, removeOnServer, syncReminder } from './src/services/api';
 
 type Screen = 'list' | 'new' | 'settings' | 'anniversary';
@@ -44,6 +46,7 @@ function AppInner() {
   const [overdue, setOverdue] = useState<Reminder | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [signDaysLeft, setSignDaysLeft] = useState(7);
+  const [lastSyncAt, setLastSyncAt] = useState<number | undefined>();
 
   const remindersRef = useRef<Reminder[]>([]);
   useEffect(() => {
@@ -55,28 +58,38 @@ function AppInner() {
     configRef.current = config;
   }, [config]);
 
-  /** 拉云端：补回缺失提醒 + 刷新推送统计 */
-  const mergeCloud = useCallback(async (cfg: ChannelConfig, local: Reminder[]): Promise<Reminder[]> => {
-    const cloud = await fetchPendingReminders(cfg);
-    if (!cloud.ok || !cloud.reminders) return local;
-
-    const byId = new Map(local.map((item) => [item.id, item]));
-    for (const item of cloud.reminders) {
-      const existing = byId.get(item.id);
-      if (existing) {
-        // 只合并推送统计，不覆盖本地编辑
-        byId.set(item.id, {
-          ...existing,
-          pushCount: item.pushCount,
-          lastPushAt: item.lastPushAt,
-        });
-      } else {
-        const alarmIds = await scheduleFor(item).catch(() => [] as string[]);
-        byId.set(item.id, { ...item, alarmIds, syncedAt: Date.now() });
-      }
-    }
-    return [...byId.values()];
+  const markSync = useCallback(async () => {
+    const ts = Date.now();
+    setLastSyncAt(ts);
+    await saveLastSync(ts);
   }, []);
+
+  /** 拉云端：补回缺失提醒 + 刷新推送统计 */
+  const mergeCloud = useCallback(
+    async (cfg: ChannelConfig, local: Reminder[]): Promise<Reminder[]> => {
+      const cloud = await fetchPendingReminders(cfg);
+      if (!cloud.ok || !cloud.reminders) return local;
+      await markSync();
+
+      const byId = new Map(local.map((item) => [item.id, item]));
+      for (const item of cloud.reminders) {
+        const existing = byId.get(item.id);
+        if (existing) {
+          // 只合并推送统计，不覆盖本地编辑
+          byId.set(item.id, {
+            ...existing,
+            pushCount: item.pushCount,
+            lastPushAt: item.lastPushAt,
+          });
+        } else {
+          const alarmIds = await scheduleFor(item).catch(() => [] as string[]);
+          byId.set(item.id, { ...item, alarmIds, syncedAt: Date.now() });
+        }
+      }
+      return [...byId.values()];
+    },
+    [markSync],
+  );
 
   // App 在前台时也要能弹出确认页：每 30 秒的 tick 也会触发检查
   useEffect(() => {
@@ -100,6 +113,11 @@ function AppInner() {
       getSignInfo()
         .then((info) => {
           if (mounted) setSignDaysLeft(info.daysLeft);
+        })
+        .catch(() => undefined);
+      loadLastSync()
+        .then((ts) => {
+          if (mounted) setLastSyncAt(ts);
         })
         .catch(() => undefined);
 
@@ -220,6 +238,7 @@ function AppInner() {
         const sync = await syncReminder(config, saved);
         if (sync.ok) {
           saved = { ...saved, syncedAt: Date.now() };
+          await markSync();
         } else {
           syncError = sync.error;
         }
@@ -242,7 +261,7 @@ function AppInner() {
         );
       }
     },
-    [config, editing, persist, reminders],
+    [config, editing, markSync, persist, reminders],
   );
 
   const handleGenerateAnniversary = useCallback(
@@ -368,11 +387,38 @@ function AppInner() {
               synced.has(item.id) ? { ...item, syncedAt: synced.get(item.id) } : item,
             ),
           );
+          await markSync();
         }
       }
     },
-    [persist, reminders],
+    [markSync, persist, reminders],
   );
+
+  /** 一键创建「每周重签」提醒：免费签名 7 天到期，靠它保住兜底链 */
+  const handleAddResignReminder = useCallback(async () => {
+    const nowTs = Date.now();
+    const d = new Date();
+    d.setHours(20, 0, 0, 0);
+    d.setDate(d.getDate() + ((7 - d.getDay()) % 7 || 7));
+
+    const reminder: Reminder = {
+      id: 'resign-weekly',
+      title: '重签强提醒（每周日 20:00）',
+      note: '连电脑打开 Sideloadly，用同一个 IPA 重新签名安装。',
+      fireAt: d.getTime(),
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
+      forceLevel: 3,
+      repeat: 'weekly',
+      steps: stepsForLevel(3).filter(
+        (step) => step.afterSec >= 0 || d.getTime() + step.afterSec * 1000 > nowTs,
+      ),
+      status: 'pending',
+      createdAt: nowTs,
+    };
+
+    await handleSave(reminder);
+    Alert.alert('已添加', '每周日 20:00 提醒你重签（已存在会覆盖）。');
+  }, [handleSave]);
 
   const handleRequestPermissions = useCallback(async () => {
     const result = await requestPermissions();
@@ -393,6 +439,18 @@ function AppInner() {
       missed: reminders.filter((item) => item.status === 'missed').length,
     };
   }, [reminders, now]);
+
+  const alarmStats = useMemo(() => {
+    let alarmKit = 0;
+    let notifications = 0;
+    for (const item of reminders) {
+      for (const id of item.alarmIds ?? []) {
+        if (id.startsWith('alarmkit:')) alarmKit += 1;
+        else notifications += 1;
+      }
+    }
+    return { alarmKit, notifications, total: alarmKit + notifications };
+  }, [reminders]);
 
   const groups = groupReminders(reminders, now);
 
@@ -456,6 +514,9 @@ function AppInner() {
           config={config}
           alarmKitAvailable={alarmKitAvailable}
           stats={monthStats}
+          lastSyncAt={lastSyncAt}
+          alarmStats={alarmStats}
+          onAddResignReminder={handleAddResignReminder}
           onSave={handleSaveConfig}
           onBack={() => setScreen('list')}
           onRequestPermissions={handleRequestPermissions}

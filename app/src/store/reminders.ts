@@ -97,7 +97,18 @@ export function findOverduePending(list: Reminder[], now = Date.now(), windowMs 
 }
 
 const INSTALL_KEY = '@strong-reminder/installedAt/v1';
+const LAST_SYNC_KEY = '@strong-reminder/lastSync/v1';
 const SIGN_DAYS = 7;
+
+export async function loadLastSync(): Promise<number | undefined> {
+  const raw = await AsyncStorage.getItem(LAST_SYNC_KEY);
+  const value = raw ? Number(raw) : 0;
+  return value > 0 ? value : undefined;
+}
+
+export async function saveLastSync(at = Date.now()): Promise<void> {
+  await AsyncStorage.setItem(LAST_SYNC_KEY, String(at));
+}
 
 /**
  * 免费签名有效期 7 天，从（重新）安装那一刻算起。
