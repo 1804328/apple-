@@ -223,132 +223,178 @@ function AppInner() {
     await saveReminders(next);
   }, []);
 
+  const actionLockRef = useRef<Set<string>>(new Set());
+
+  /** 同一操作执行期间忽略重复触发：防连点重复排闹钟 / 重复请求 */
+  const runExclusive = useCallback(async (key: string, fn: () => Promise<void>) => {
+    if (actionLockRef.current.has(key)) return;
+    actionLockRef.current.add(key);
+    try {
+      await fn();
+    } finally {
+      actionLockRef.current.delete(key);
+    }
+  }, []);
+
   const handleSave = useCallback(
-    async (reminder: Reminder) => {
-      const previous = editing;
-      if (previous) {
-        await cancelFor(previous.alarmIds ?? []);
-      }
-      const alarmIds = await scheduleFor(reminder).catch(() => [] as string[]);
-      let saved: Reminder = { ...reminder, alarmIds };
+    (reminder: Reminder) =>
+      runExclusive(`save:${reminder.id}`, async () => {
+        const previous = editing;
 
-      // 先同步云端：成功就把 syncedAt 一起落本地，卡片上显示「云端已登记」
-      let syncError: string | undefined;
-      if (config.syncEnabled) {
-        const sync = await syncReminder(config, saved);
-        if (sync.ok) {
-          saved = { ...saved, syncedAt: Date.now() };
-          await markSync();
-        } else {
-          syncError = sync.error;
+        // 1) 立即返回列表并本地落盘，不等闹钟排程和网络
+        setScreen('list');
+        setEditing(null);
+
+        const list = remindersRef.current;
+        const exists = list.some((item) => item.id === reminder.id);
+        let saved: Reminder = { ...reminder, alarmIds: [] };
+        let next = exists
+          ? list.map((item) => (item.id === saved.id ? saved : item))
+          : [...list, saved];
+        await persist(next);
+        setOverdue(findOverduePending(next));
+
+        // 2) 后台：取消旧闹钟、排新闹钟
+        if (previous) {
+          await cancelFor(previous.alarmIds ?? []).catch(() => undefined);
         }
-      }
+        const alarmIds = await scheduleFor(reminder).catch(() => [] as string[]);
+        saved = { ...saved, alarmIds };
 
-      const exists = reminders.some((item) => item.id === saved.id);
-      const next = exists
-        ? reminders.map((item) => (item.id === saved.id ? saved : item))
-        : [...reminders, saved];
+        // 3) 后台：同步云端
+        let syncError: string | undefined;
+        if (config.syncEnabled) {
+          const sync = await syncReminder(config, saved);
+          if (sync.ok) {
+            saved = { ...saved, syncedAt: Date.now() };
+            await markSync();
+          } else {
+            syncError = sync.error;
+          }
+        }
 
-      await persist(next);
-      setScreen('list');
-      setEditing(null);
-      setOverdue(findOverduePending(next));
+        next = remindersRef.current.some((item) => item.id === saved.id)
+          ? remindersRef.current.map((item) => (item.id === saved.id ? saved : item))
+          : [...remindersRef.current, saved];
+        await persist(next);
+        setOverdue(findOverduePending(next));
 
-      if (syncError) {
-        Alert.alert(
-          '已保存在本机',
-          `云端同步失败：${syncError}\n\n到点仍会本地响，但微信兜底暂时不会生效。`,
-        );
-      }
-    },
-    [config, editing, markSync, persist, reminders],
+        if (syncError) {
+          Alert.alert(
+            '已保存在本机',
+            `云端同步失败：${syncError}\n\n到点仍会本地响，但微信兜底暂时不会生效。`,
+          );
+        }
+      }),
+    [config, editing, markSync, persist, runExclusive],
   );
 
   const handleGenerateAnniversary = useCallback(
-    async (items: Reminder[]) => {
-      const generated: Reminder[] = [];
-      for (const item of items) {
-        const alarmIds = await scheduleFor(item).catch(() => [] as string[]);
-        let saved: Reminder = { ...item, alarmIds };
-        if (config.syncEnabled) {
-          const sync = await syncReminder(config, saved);
-          if (sync.ok) saved = { ...saved, syncedAt: Date.now() };
+    (items: Reminder[]) =>
+      runExclusive('anniversary:generate', async () => {
+        setScreen('list');
+
+        const generated: Reminder[] = [];
+        for (const item of items) {
+          const alarmIds = await scheduleFor(item).catch(() => [] as string[]);
+          let saved: Reminder = { ...item, alarmIds };
+          if (config.syncEnabled) {
+            const sync = await syncReminder(config, saved);
+            if (sync.ok) {
+              saved = { ...saved, syncedAt: Date.now() };
+              await markSync();
+            }
+          }
+          generated.push(saved);
         }
-        generated.push(saved);
-      }
 
-      // 同 id 覆盖，避免重复生成堆出重复提醒
-      const merged = new Map(reminders.map((item) => [item.id, item]));
-      for (const item of generated) merged.set(item.id, item);
-      const next = [...merged.values()];
-      await persist(next);
+        // 同 id 覆盖，避免重复生成堆出重复提醒
+        const merged = new Map(remindersRef.current.map((item) => [item.id, item]));
+        for (const item of generated) merged.set(item.id, item);
+        const next = [...merged.values()];
+        await persist(next);
 
-      setScreen('list');
-      setOverdue(findOverduePending(next));
-      Alert.alert(
-        '已生成纪念日提醒',
-        `共 ${generated.length} 条。同一个纪念日重复生成会覆盖，不会产生重复项。`,
-      );
-    },
-    [config, persist, reminders],
+        setOverdue(findOverduePending(next));
+        Alert.alert(
+          '已生成纪念日提醒',
+          `共 ${generated.length} 条。同一个纪念日重复生成会覆盖，不会产生重复项。`,
+        );
+      }),
+    [config, markSync, persist, runExclusive],
   );
 
   const handleAck = useCallback(
-    async (reminder: Reminder) => {
-      // 重复提醒：不落成「已完成」，而是滚到下一周期继续提醒
-      if (reminder.repeat && reminder.repeat !== 'none') {
+    (reminder: Reminder) =>
+      runExclusive(`ack:${reminder.id}`, async () => {
+        const list = remindersRef.current;
+
+        // 重复提醒：不落成「已完成」，而是滚到下一周期继续提醒
+        if (reminder.repeat && reminder.repeat !== 'none') {
+          await cancelFor(reminder.alarmIds ?? []);
+          const fireAt = nextOccurrence(reminder.fireAt, reminder.repeat);
+          const rolled: Reminder = {
+            ...reminder,
+            fireAt,
+            status: 'pending',
+            ackedAt: undefined,
+            alarmIds: [],
+          };
+          const alarmIds = await scheduleFor(rolled).catch(() => [] as string[]);
+          let saved: Reminder = { ...rolled, alarmIds };
+
+          if (config.syncEnabled) {
+            const result = await syncReminder(config, saved);
+            if (result.ok) {
+              saved = { ...saved, syncedAt: Date.now() };
+              await markSync();
+            }
+          }
+
+          const nextList = list.map((item) => (item.id === saved.id ? saved : item));
+          await persist(nextList);
+          setOverdue((prev) => (prev?.id === reminder.id ? null : prev));
+          Alert.alert('下一次的提醒已排好', `「${reminder.title}」已滚到下一个周期。`);
+          return;
+        }
+
         await cancelFor(reminder.alarmIds ?? []);
-        const fireAt = nextOccurrence(reminder.fireAt, reminder.repeat);
-        const rolled: Reminder = { ...reminder, fireAt, status: 'pending', ackedAt: undefined, alarmIds: [] };
-        const alarmIds = await scheduleFor(rolled).catch(() => [] as string[]);
-        const saved: Reminder = { ...rolled, alarmIds, syncedAt: Date.now() };
-        const nextList = reminders.map((item) => (item.id === saved.id ? saved : item));
+        const nextList = list.map((item) =>
+          item.id === reminder.id
+            ? { ...item, status: 'acked' as const, ackedAt: Date.now(), alarmIds: [] }
+            : item,
+        );
         await persist(nextList);
         setOverdue((prev) => (prev?.id === reminder.id ? null : prev));
+
         if (config.syncEnabled) {
-          await syncReminder(config, saved);
+          const result = await ackOnServer(config, reminder.id);
+          if (!result.ok) {
+            console.warn('ack sync failed', result.error);
+          }
         }
-        Alert.alert('下一次的提醒已排好', `「${reminder.title}」已滚到下一个周期。`);
-        return;
-      }
-
-      await cancelFor(reminder.alarmIds ?? []);
-      const next = reminders.map((item) =>
-        item.id === reminder.id
-          ? { ...item, status: 'acked' as const, ackedAt: Date.now(), alarmIds: [] }
-          : item,
-      );
-      await persist(next);
-      setOverdue((prev) => (prev?.id === reminder.id ? null : prev));
-
-      if (config.syncEnabled) {
-        const result = await ackOnServer(config, reminder.id);
-        if (!result.ok) {
-          console.warn('ack sync failed', result.error);
-        }
-      }
-    },
-    [config, persist, reminders],
+      }),
+    [config, markSync, persist, runExclusive],
   );
 
   const handleSnooze = useCallback(
-    async (reminder: Reminder) => {
-      const nextFireAt = Date.now() + SNOOZE_MS;
-      await cancelFor(reminder.alarmIds ?? []);
-      const rescheduled: Reminder = { ...reminder, fireAt: nextFireAt, status: 'pending' };
-      const alarmIds = await scheduleFor(rescheduled).catch(() => [] as string[]);
-      const saved: Reminder = { ...rescheduled, alarmIds };
+    (reminder: Reminder) =>
+      runExclusive(`snooze:${reminder.id}`, async () => {
+        const nextFireAt = Date.now() + SNOOZE_MS;
+        await cancelFor(reminder.alarmIds ?? []);
+        const rescheduled: Reminder = { ...reminder, fireAt: nextFireAt, status: 'pending' };
+        const alarmIds = await scheduleFor(rescheduled).catch(() => [] as string[]);
+        const saved: Reminder = { ...rescheduled, alarmIds };
 
-      const next = reminders.map((item) => (item.id === saved.id ? saved : item));
-      await persist(next);
-      setOverdue(null);
-      setNow(Date.now());
+        const next = remindersRef.current.map((item) => (item.id === saved.id ? saved : item));
+        await persist(next);
+        setOverdue(null);
+        setNow(Date.now());
 
-      if (config.syncEnabled) {
-        await syncReminder(config, saved);
-      }
-    },
-    [config, persist, reminders],
+        if (config.syncEnabled) {
+          await syncReminder(config, saved);
+        }
+      }),
+    [config, persist, runExclusive],
   );
 
   const handleDelete = useCallback(
@@ -358,40 +404,42 @@ function AppInner() {
         {
           text: '删除',
           style: 'destructive',
-          onPress: async () => {
-            await cancelFor(reminder.alarmIds ?? []);
-            await persist(reminders.filter((item) => item.id !== reminder.id));
-            setOverdue((prev) => (prev?.id === reminder.id ? null : prev));
-            if (config.syncEnabled) removeOnServer(config, reminder.id).catch(() => undefined);
-          },
+          onPress: () =>
+            runExclusive(`delete:${reminder.id}`, async () => {
+              await cancelFor(reminder.alarmIds ?? []);
+              await persist(remindersRef.current.filter((item) => item.id !== reminder.id));
+              setOverdue((prev) => (prev?.id === reminder.id ? null : prev));
+              if (config.syncEnabled) removeOnServer(config, reminder.id).catch(() => undefined);
+            }),
         },
       ]);
     },
-    [config, persist, reminders],
+    [config, persist, runExclusive, reminders],
   );
 
   const handleSaveConfig = useCallback(
-    async (nextConfig: ChannelConfig) => {
-      setConfig(nextConfig);
-      await saveConfig(nextConfig);
-      if (nextConfig.syncEnabled) {
-        const pending = reminders.filter((item) => item.status === 'pending');
-        const synced = new Map<string, number>();
-        for (const item of pending) {
-          const result = await syncReminder(nextConfig, item);
-          if (result.ok) synced.set(item.id, Date.now());
+    (nextConfig: ChannelConfig) =>
+      runExclusive('settings:save', async () => {
+        setConfig(nextConfig);
+        await saveConfig(nextConfig);
+        if (nextConfig.syncEnabled) {
+          const pending = remindersRef.current.filter((item) => item.status === 'pending');
+          const synced = new Map<string, number>();
+          for (const item of pending) {
+            const result = await syncReminder(nextConfig, item);
+            if (result.ok) synced.set(item.id, Date.now());
+          }
+          if (synced.size > 0) {
+            await persist(
+              remindersRef.current.map((item) =>
+                synced.has(item.id) ? { ...item, syncedAt: synced.get(item.id) } : item,
+              ),
+            );
+            await markSync();
+          }
         }
-        if (synced.size > 0) {
-          await persist(
-            reminders.map((item) =>
-              synced.has(item.id) ? { ...item, syncedAt: synced.get(item.id) } : item,
-            ),
-          );
-          await markSync();
-        }
-      }
-    },
-    [markSync, persist, reminders],
+      }),
+    [markSync, persist, runExclusive],
   );
 
   /** 一键创建「每周重签」提醒：免费签名 7 天到期，靠它保住兜底链 */
