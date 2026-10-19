@@ -17,6 +17,7 @@ interface Props {
   onEdit: (reminder: Reminder) => void;
   onDelete: (reminder: Reminder) => void;
   onOpenSettings: () => void;
+  onOpenAnniversary: () => void;
 }
 
 const FORCE_LABEL: Record<number, string> = {
@@ -124,6 +125,7 @@ export default function ListScreen({
   onEdit,
   onDelete,
   onOpenSettings,
+  onOpenAnniversary,
 }: Props) {
   const total = groups.overdue.length + groups.today.length + groups.later.length;
 
@@ -138,9 +140,14 @@ export default function ListScreen({
               : '还没有待触发的提醒'}
           </Text>
         </View>
-        <Pressable style={styles.settingsButton} onPress={onOpenSettings} hitSlop={12}>
-          <Text style={styles.settingsIcon}>⚙︎</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable style={styles.settingsButton} onPress={onOpenAnniversary} hitSlop={12}>
+            <Text style={styles.settingsIcon}>🎂</Text>
+          </Pressable>
+          <Pressable style={styles.settingsButton} onPress={onOpenSettings} hitSlop={12}>
+            <Text style={styles.settingsIcon}>⚙︎</Text>
+          </Pressable>
+        </View>
       </View>
 
       {!alarmKitAvailable ? (
@@ -271,6 +278,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   settingsIcon: { color: colors.textDim, fontSize: 20 },
+  headerActions: { flexDirection: 'row', gap: spacing.sm },
   banner: {
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,

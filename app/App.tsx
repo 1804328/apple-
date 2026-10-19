@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import ListScreen from './src/screens/ListScreen';
 import NewReminderScreen from './src/screens/NewReminderScreen';
+import AnniversaryScreen from './src/screens/AnniversaryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import OverdueScreen from './src/screens/OverdueScreen';
 import { colors } from './src/theme';
@@ -27,7 +28,7 @@ import {
 } from './src/services/alarms';
 import { ackOnServer, fetchPendingReminders, removeOnServer, syncReminder } from './src/services/api';
 
-type Screen = 'list' | 'new' | 'settings';
+type Screen = 'list' | 'new' | 'settings' | 'anniversary';
 
 const SNOOZE_MS = 5 * 60 * 1000;
 
@@ -162,6 +163,35 @@ export default function App() {
     [config, editing, persist, reminders],
   );
 
+  const handleGenerateAnniversary = useCallback(
+    async (items: Reminder[]) => {
+      const generated: Reminder[] = [];
+      for (const item of items) {
+        const alarmIds = await scheduleFor(item).catch(() => [] as string[]);
+        let saved: Reminder = { ...item, alarmIds };
+        if (config.syncEnabled) {
+          const sync = await syncReminder(config, saved);
+          if (sync.ok) saved = { ...saved, syncedAt: Date.now() };
+        }
+        generated.push(saved);
+      }
+
+      // 同 id 覆盖，避免重复生成堆出重复提醒
+      const merged = new Map(reminders.map((item) => [item.id, item]));
+      for (const item of generated) merged.set(item.id, item);
+      const next = [...merged.values()];
+      await persist(next);
+
+      setScreen('list');
+      setOverdue(findOverduePending(next));
+      Alert.alert(
+        '已生成纪念日提醒',
+        `共 ${generated.length} 条。同一个纪念日重复生成会覆盖，不会产生重复项。`,
+      );
+    },
+    [config, persist, reminders],
+  );
+
   const handleAck = useCallback(
     async (reminder: Reminder) => {
       await cancelFor(reminder.alarmIds ?? []);
@@ -288,6 +318,7 @@ export default function App() {
           }}
           onDelete={handleDelete}
           onOpenSettings={() => setScreen('settings')}
+          onOpenAnniversary={() => setScreen('anniversary')}
         />
       ) : null}
 
@@ -299,6 +330,13 @@ export default function App() {
             setScreen('list');
           }}
           onSave={handleSave}
+        />
+      ) : null}
+
+      {screen === 'anniversary' ? (
+        <AnniversaryScreen
+          onCancel={() => setScreen('list')}
+          onGenerate={handleGenerateAnniversary}
         />
       ) : null}
 
