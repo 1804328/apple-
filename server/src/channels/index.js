@@ -51,7 +51,8 @@ export async function sendOnChannel(channel, ctx) {
 
   const adapter = adapters[provider];
   if (!adapter) {
-    return { ok: false, skipped: true, error: `通道尚未实现: ${channel}` };
+    // 未实现的通道（email/sms/voice）静默跳过，避免被记成"投递失败"并反复重试
+    return { ok: true, skipped: true, error: `通道尚未实现: ${channel}` };
   }
 
   try {

@@ -207,6 +207,18 @@ export default {
       return json({ ok: true });
     }
 
+    // 手动触发一次微信通道测试，便于排查 Webhook / token 是否有效
+    if (pathname === '/api/test' && request.method === 'POST') {
+      const base = (env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '');
+      const result = await sendOnChannel('pushplus', {
+        env,
+        title: '强提醒 · 通道测试',
+        content: `这是一条测试推送。\n时间：${new Date(now * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`,
+        url: base ? `${base}/health` : undefined,
+      });
+      return json({ ok: result.ok, skipped: result.skipped ?? false, error: result.error ?? null });
+    }
+
     return json({ ok: false, error: 'not found' }, 404);
   },
 
