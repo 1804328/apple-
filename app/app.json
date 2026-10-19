@@ -7,6 +7,7 @@
     "scheme": "strongreminder",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
+    "icon": "./assets/icon.png",
     "platforms": ["ios", "android"],
     "ios": {
       "supportsTablet": false,
