@@ -52,7 +52,7 @@ if ($who -match 'not authenticated' -or $who -match 'not logged in' -or $who -ma
 
 # ---------------------------------------------------------------- 1. D1
 Step "1/5 准备 D1 数据库"
-$tomlText = Get-Content $TOML -Raw
+$tomlText = Get-Content $TOML -Raw -Encoding UTF8
 
 if ($tomlText -match 'REPLACE_ME') {
   $create = Run "npx --yes wrangler@4 d1 create $D1_NAME" -AllowFail
@@ -108,7 +108,7 @@ Remove-Item $tmpSecrets -Force
 
 # ---------------------------------------------------------------- 5. 回填域名再部署
 Step "5/5 回填 PUBLIC_BASE_URL 并重新部署"
-$tomlText = Get-Content $TOML -Raw
+$tomlText = Get-Content $TOML -Raw -Encoding UTF8
 $tomlText = $tomlText -replace 'PUBLIC_BASE_URL\s*=\s*"[^"]*"', ('PUBLIC_BASE_URL = "' + $workerUrl + '"')
 Write-Utf8NoBom $TOML $tomlText
 

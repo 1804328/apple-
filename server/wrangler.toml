@@ -2,21 +2,22 @@ name = "strong-reminder"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
 
-# 每分钟扫一次：到点未确认 → 升级
+# cron trigger: every minute, check due reminders and escalate
 [triggers]
 crons = ["* * * * *"]
 
 [[d1_databases]]
 binding = "DB"
 database_name = "strong-reminder"
-# 执行 `wrangler d1 create strong-reminder` 后，把返回的 database_id 填进来
-database_id = "REPLACE_ME"
+database_id = "e4d8410f-2364-416d-9411-1be57d16edb2"
 
 [vars]
-# 确认链接的基地址，部署后改成你的 workers.dev 域名
-PUBLIC_BASE_URL = "https://strong-reminder.example.workers.dev"
+# Base URL used to build "ack" links inside WeChat/WeCom pushes.
+# Replace with the custom domain once it is bound to the Worker.
+PUBLIC_BASE_URL = "https://strong-reminder.1804328114.workers.dev"
 
-# 密钥用 `wrangler secret put` 注入，不要写在这里：
-#   API_KEY           App 调用 /api/* 的共享密钥
-#   PUSHPLUS_TOKEN    PushPlus 的 token（微信推送）
-#   SMS_*             M4 再启用
+# Secrets (set via `wrangler secret put`, never store here):
+#   API_KEY
+#   WECOM_WEBHOOK            (recommended, free)
+#   WXPUSHER_APP_TOKEN + WXPUSHER_UIDS  (alternative, free)
+#   PUSHPLUS_TOKEN           (legacy, now paid)
