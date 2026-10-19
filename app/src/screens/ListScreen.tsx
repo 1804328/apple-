@@ -38,6 +38,71 @@ const FORCE_LABEL: Record<number, string> = {
   6: '硬核+',
 };
 
+function repeatLabel(reminder: Reminder): string {
+  if (reminder.repeat === 'yearly') return '每年';
+  if (reminder.repeat === 'monthly') return '每月';
+  if (reminder.repeat === 'weekly') return '每周';
+  return '';
+}
+
+/** 长期列表用紧凑行：图标 + 标题 + 日期，点开编辑 */
+function iconFor(reminder: Reminder): string {
+  if (reminder.id === 'resign-weekly') return '🔧';
+  if (reminder.id.startsWith('lunar-') || reminder.note.includes('农历')) return '🌙';
+  if (reminder.id.startsWith('anniv-')) return '⏳';
+  if (reminder.id.startsWith('yearly-')) return '🎂';
+  if (reminder.repeat === 'weekly') return '🗓️';
+  if (reminder.repeat === 'monthly') return '📅';
+  if (reminder.repeat === 'yearly') return '🎂';
+  return '📌';
+}
+
+function LongRow({
+  reminder,
+  now,
+  onEdit,
+  onDelete,
+}: {
+  reminder: Reminder;
+  now: number;
+  onEdit: (r: Reminder) => void;
+  onDelete: (r: Reminder) => void;
+}) {
+  const repeat = repeatLabel(reminder);
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      onPress={() => onEdit(reminder)}
+    >
+      <Text style={styles.rowIcon}>{iconFor(reminder)}</Text>
+      <View style={styles.rowBody}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {reminder.title}
+        </Text>
+        <Text style={styles.rowMeta} numberOfLines={1}>
+          {formatFireLabel(reminder.fireAt, now)}
+          {repeat ? ` · ${repeat}` : ''}
+          {pendingCountdown(reminder, now)}
+        </Text>
+      </View>
+      <Pressable
+        hitSlop={8}
+        onPress={(event) => {
+          event.stopPropagation();
+          onDelete(reminder);
+        }}
+      >
+        <Text style={styles.rowDelete}>删除</Text>
+      </Pressable>
+    </Pressable>
+  );
+}
+
+function pendingCountdown(reminder: Reminder, now: number): string {
+  if (reminder.status !== 'pending' || reminder.fireAt <= now) return '';
+  return ` · 还有 ${formatCountdown(reminder.fireAt, now)}`;
+}
+
 function ReminderCard({
   reminder,
   now,
@@ -293,12 +358,10 @@ export default function ListScreen({
             ) : (
               <Section label="30 天以后 / 重复提醒">
                 {longList.map((item) => (
-                  <ReminderCard
+                  <LongRow
                     key={item.id}
                     reminder={item}
                     now={now}
-                    syncEnabled={syncEnabled}
-                    onAck={onAck}
                     onEdit={onEdit}
                     onDelete={onDelete}
                   />
@@ -379,6 +442,23 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   sectionDanger: { color: colors.danger },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  rowPressed: { backgroundColor: colors.cardPressed },
+  rowIcon: { fontSize: 22, width: 34, textAlign: 'center' },
+  rowBody: { flex: 1, marginLeft: spacing.sm },
+  rowTitle: { color: colors.text, fontSize: 15, fontWeight: '600' },
+  rowMeta: { color: colors.textDim, fontSize: 12, marginTop: 2 },
+  rowDelete: { color: colors.textFaint, fontSize: 12, paddingLeft: spacing.md },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
