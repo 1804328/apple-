@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { colors, radius, spacing } from '../theme';
+import { colors, levelColors, radius, spacing } from '../theme';
 import { formatCountdown, formatFireLabel } from '../lib/time';
 import type { Reminder } from '../types';
 import type { ReminderGroups } from '../store/reminders';
@@ -74,7 +74,9 @@ function LongRow({
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       onPress={() => onEdit(reminder)}
     >
-      <Text style={styles.rowIcon}>{iconFor(reminder)}</Text>
+      <View style={styles.rowIconWrap}>
+        <Text style={styles.rowIcon}>{iconFor(reminder)}</Text>
+      </View>
       <View style={styles.rowBody}>
         <Text style={styles.rowTitle} numberOfLines={1}>
           {reminder.title}
@@ -123,17 +125,50 @@ function ReminderCard({
 
   return (
     <Pressable
-      style={({ pressed }) => [styles.card, !pending && styles.cardDone, pressed && styles.cardPressed]}
+      style={({ pressed }) => [
+        styles.card,
+        !pending && styles.cardDone,
+        pressed && styles.cardPressed,
+        {
+          borderLeftWidth: 3,
+          borderLeftColor: overdue
+            ? colors.danger
+            : pending
+              ? levelColors[reminder.forceLevel] ?? colors.accent
+              : colors.border,
+        },
+      ]}
       onPress={() => onEdit(reminder)}
     >
       <View style={styles.cardTop}>
         <Text style={styles.cardTitle} numberOfLines={2}>
           {reminder.title}
         </Text>
-        <View style={[styles.badge, pending ? styles.badgePending : styles.badgeDone]}>
-          <Text style={styles.badgeText}>
-            {pending ? (overdue ? '待确认' : FORCE_LABEL[reminder.forceLevel] ?? '标准') : '已完成'}
-          </Text>
+        <View style={styles.badgeRow}>
+          {reminder.unlock === 'math' ? (
+            <View style={styles.hardcoreChip}>
+              <Text style={styles.hardcoreText}>强制</Text>
+            </View>
+          ) : null}
+          <View
+            style={[
+              styles.badge,
+              { backgroundColor: overdue ? colors.dangerSoft : colors.accentSoft },
+            ]}
+          >
+            <Text
+              style={[
+                styles.badgeText,
+                {
+                  color: overdue
+                    ? colors.danger
+                    : levelColors[reminder.forceLevel] ?? colors.accentText,
+                },
+              ]}
+            >
+              {pending ? (overdue ? '待确认' : FORCE_LABEL[reminder.forceLevel] ?? '标准') : '已完成'}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -389,8 +424,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  title: { color: colors.text, fontSize: 30, fontWeight: '800', letterSpacing: 1 },
-  subtitle: { color: colors.textDim, fontSize: 12, marginTop: 2 },
+  title: { color: colors.text, fontSize: 26, fontWeight: '800', letterSpacing: 0.5 },
+  subtitle: { color: colors.textDim, fontSize: 12, marginTop: 3 },
   headerActions: { flexDirection: 'row', gap: spacing.sm },
   settingsButton: {
     width: 40,
@@ -406,22 +441,20 @@ const styles = StyleSheet.create({
   segment: {
     flexDirection: 'row',
     marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: 3,
+    marginBottom: spacing.md,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.pill,
+    padding: 4,
   },
   segmentItem: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 8,
-    borderRadius: radius.sm,
+    paddingVertical: 9,
+    borderRadius: radius.pill,
   },
-  segmentActive: { backgroundColor: '#1c2a40' },
-  segmentText: { color: colors.textDim, fontSize: 14, fontWeight: '600' },
-  segmentTextActive: { color: colors.text },
+  segmentActive: { backgroundColor: colors.accentSoft },
+  segmentText: { color: colors.textFaint, fontSize: 14, fontWeight: '600' },
+  segmentTextActive: { color: colors.accentText },
   banner: {
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
@@ -454,8 +487,16 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   rowPressed: { backgroundColor: colors.cardPressed },
-  rowIcon: { fontSize: 22, width: 34, textAlign: 'center' },
-  rowBody: { flex: 1, marginLeft: spacing.sm },
+  rowIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowIcon: { fontSize: 19 },
+  rowBody: { flex: 1, marginLeft: spacing.md },
   rowTitle: { color: colors.text, fontSize: 15, fontWeight: '600' },
   rowMeta: { color: colors.textDim, fontSize: 12, marginTop: 2 },
   rowDelete: { color: colors.textFaint, fontSize: 12, paddingLeft: spacing.md },
@@ -469,9 +510,22 @@ const styles = StyleSheet.create({
   },
   cardPressed: { backgroundColor: colors.cardPressed },
   cardDone: { opacity: 0.55 },
+  badge: {
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    marginLeft: spacing.xs,
+  },
+  badgeRow: { flexDirection: 'row', alignItems: 'center' },
+  hardcoreChip: {
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: colors.dangerSoft,
+  },
+  hardcoreText: { color: colors.danger, fontSize: 10, fontWeight: '700' },
   cardTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   cardTitle: { color: colors.text, fontSize: 18, fontWeight: '700', flex: 1, marginRight: spacing.sm },
-  badge: { borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 3 },
   badgePending: { backgroundColor: '#1e2b3f' },
   badgeDone: { backgroundColor: '#1d2530' },
   badgeText: { color: colors.textDim, fontSize: 11, fontWeight: '600' },
@@ -485,12 +539,12 @@ const styles = StyleSheet.create({
   note: { color: colors.textFaint, fontSize: 13, marginTop: spacing.xs, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   actionPrimary: {
-    backgroundColor: '#1c3355',
+    backgroundColor: colors.accentSoft,
     borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: 7,
   },
-  actionPrimaryText: { color: '#9dc0ff', fontSize: 13, fontWeight: '600' },
+  actionPrimaryText: { color: colors.accentText, fontSize: 13, fontWeight: '600' },
   actionGhost: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -500,24 +554,24 @@ const styles = StyleSheet.create({
   },
   actionGhostText: { color: colors.textFaint, fontSize: 13 },
   empty: { alignItems: 'center', paddingVertical: 80, paddingHorizontal: spacing.xl },
-  emptyIcon: { fontSize: 44, marginBottom: spacing.md },
-  emptyTitle: { color: colors.text, fontSize: 18, fontWeight: '700', marginBottom: spacing.sm },
+  emptyIcon: { fontSize: 56, marginBottom: spacing.lg },
+  emptyTitle: { color: colors.text, fontSize: 20, fontWeight: '700', marginBottom: spacing.sm },
   emptyText: { color: colors.textDim, fontSize: 14, textAlign: 'center', lineHeight: 21 },
   fab: {
     position: 'absolute',
     right: spacing.xl,
-    bottom: 40,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    bottom: 36,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
   },
-  fabText: { color: '#fff', fontSize: 30, lineHeight: 34, fontWeight: '300' },
+  fabText: { color: '#fff', fontSize: 28, lineHeight: 32, fontWeight: '300' },
 });
