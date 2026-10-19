@@ -47,9 +47,11 @@ function stepLabel(afterSec: number): string {
   return `+${Math.round(abs / 60)} 分钟`;
 }
 
-function presetDate(kind: 'hour' | 'tonight' | 'tomorrow'): Date {
-  const d = new Date();
+type PresetKind = 'hour' | 'tonight' | 'tomorrow' | 'in3days' | 'nextMonday' | 'nextMonthFirst';
+
+function presetDate(kind: PresetKind): Date {
   if (kind === 'hour') {
+    const d = new Date();
     d.setTime(Date.now() + 3600_000);
     return d;
   }
@@ -59,8 +61,28 @@ function presetDate(kind: 'hour' | 'tonight' | 'tomorrow'): Date {
     if (t.getTime() <= Date.now()) t.setDate(t.getDate() + 1);
     return t;
   }
+  if (kind === 'tomorrow') {
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    t.setHours(9, 0, 0, 0);
+    return t;
+  }
+  if (kind === 'in3days') {
+    const t = new Date();
+    t.setDate(t.getDate() + 3);
+    t.setHours(9, 0, 0, 0);
+    return t;
+  }
+  if (kind === 'nextMonday') {
+    const t = new Date();
+    const delta = ((8 - t.getDay()) % 7) || 7;
+    t.setDate(t.getDate() + delta);
+    t.setHours(9, 0, 0, 0);
+    return t;
+  }
+  // nextMonthFirst
   const t = new Date();
-  t.setDate(t.getDate() + 1);
+  t.setMonth(t.getMonth() + 1, 1);
   t.setHours(9, 0, 0, 0);
   return t;
 }
@@ -75,7 +97,14 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
   const [showAndroidPicker, setShowAndroidPicker] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const steps = useMemo(() => stepsForLevel(forceLevel), [forceLevel]);
+  // 已经过去的前置预警不用排（比如 3 小时后的事不该出现「提前 1 天」）
+  const steps = useMemo(
+    () =>
+      stepsForLevel(forceLevel).filter(
+        (step) => step.afterSec >= 0 || fireAt.getTime() + step.afterSec * 1000 > Date.now(),
+      ),
+    [forceLevel, fireAt],
+  );
 
   function submit() {
     const trimmed = title.trim();
@@ -137,6 +166,18 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
           </Pressable>
           <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('tomorrow'))}>
             <Text style={styles.presetText}>明天 09:00</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.presetRow}>
+          <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('in3days'))}>
+            <Text style={styles.presetText}>3 天后</Text>
+          </Pressable>
+          <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('nextMonday'))}>
+            <Text style={styles.presetText}>下周一</Text>
+          </Pressable>
+          <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('nextMonthFirst'))}>
+            <Text style={styles.presetText}>下月 1 号</Text>
           </Pressable>
         </View>
 

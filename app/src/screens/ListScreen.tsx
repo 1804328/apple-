@@ -10,6 +10,7 @@ interface Props {
   groups: ReminderGroups;
   alarmKitAvailable: boolean;
   syncEnabled: boolean;
+  signDaysLeft: number;
   now: number;
   onNew: () => void;
   onAck: (reminder: Reminder) => void;
@@ -30,12 +31,14 @@ const FORCE_LABEL: Record<number, string> = {
 function ReminderCard({
   reminder,
   now,
+  syncEnabled,
   onAck,
   onEdit,
   onDelete,
 }: {
   reminder: Reminder;
   now: number;
+  syncEnabled: boolean;
   onAck: (r: Reminder) => void;
   onEdit: (r: Reminder) => void;
   onDelete: (r: Reminder) => void;
@@ -66,6 +69,7 @@ function ReminderCard({
             {overdue ? '已到点' : formatCountdown(reminder.fireAt, now)}
           </Text>
         ) : null}
+        {syncEnabled && reminder.syncedAt ? <Text style={styles.metaSynced}>云端已登记</Text> : null}
       </View>
 
       {reminder.note ? (
@@ -113,6 +117,7 @@ export default function ListScreen({
   groups,
   alarmKitAvailable,
   syncEnabled,
+  signDaysLeft,
   now,
   onNew,
   onAck,
@@ -146,6 +151,14 @@ export default function ListScreen({
         </View>
       ) : null}
 
+      {signDaysLeft <= 2 ? (
+        <View style={[styles.banner, styles.bannerWarn]}>
+          <Text style={styles.bannerText}>
+            免费签名还剩 {signDaysLeft} 天，到期 App 会打不开。记得连电脑用 Sideloadly 重签。
+          </Text>
+        </View>
+      ) : null}
+
       {!syncEnabled ? (
         <View style={[styles.banner, styles.bannerWarn]}>
           <Text style={styles.bannerText}>云端升级未开启，微信兜底不会生效。</Text>
@@ -170,6 +183,7 @@ export default function ListScreen({
                 key={item.id}
                 reminder={item}
                 now={now}
+                syncEnabled={syncEnabled}
                 onAck={onAck}
                 onEdit={onEdit}
                 onDelete={onDelete}
@@ -185,6 +199,7 @@ export default function ListScreen({
                 key={item.id}
                 reminder={item}
                 now={now}
+                syncEnabled={syncEnabled}
                 onAck={onAck}
                 onEdit={onEdit}
                 onDelete={onDelete}
@@ -200,6 +215,7 @@ export default function ListScreen({
                 key={item.id}
                 reminder={item}
                 now={now}
+                syncEnabled={syncEnabled}
                 onAck={onAck}
                 onEdit={onEdit}
                 onDelete={onDelete}
@@ -215,6 +231,7 @@ export default function ListScreen({
                 key={item.id}
                 reminder={item}
                 now={now}
+                syncEnabled={syncEnabled}
                 onAck={onAck}
                 onEdit={onEdit}
                 onDelete={onDelete}
@@ -294,6 +311,7 @@ const styles = StyleSheet.create({
   metaTime: { color: colors.textDim, fontSize: 13 },
   metaCountdown: { color: colors.accent, fontSize: 13, fontWeight: '600' },
   metaOverdue: { color: colors.danger },
+  metaSynced: { color: colors.ok, fontSize: 11, marginLeft: 'auto' },
   note: { color: colors.textFaint, fontSize: 13, marginTop: spacing.xs, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   actionPrimary: {

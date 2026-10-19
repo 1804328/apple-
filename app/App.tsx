@@ -11,6 +11,7 @@ import type { ChannelConfig, Reminder } from './src/types';
 import {
   DEFAULT_CONFIG,
   findOverduePending,
+  getSignInfo,
   groupReminders,
   loadConfig,
   loadReminders,
@@ -38,6 +39,7 @@ export default function App() {
   const [editing, setEditing] = useState<Reminder | null>(null);
   const [overdue, setOverdue] = useState<Reminder | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [signDaysLeft, setSignDaysLeft] = useState(7);
 
   const remindersRef = useRef<Reminder[]>([]);
   useEffect(() => {
@@ -63,6 +65,11 @@ export default function App() {
       setConfig(storedConfig);
       setReady(true);
       requestPermissions().catch(() => undefined);
+      getSignInfo()
+        .then((info) => {
+          if (mounted) setSignDaysLeft(info.daysLeft);
+        })
+        .catch(() => undefined);
 
       // 先展示本地数据
       let current: Reminder[] = stored;
@@ -83,7 +90,7 @@ export default function App() {
       const restored: Reminder[] = [];
       for (const item of missing) {
         const alarmIds = await scheduleFor(item).catch(() => [] as string[]);
-        restored.push({ ...item, alarmIds });
+        restored.push({ ...item, alarmIds, syncedAt: Date.now() });
       }
 
       current = [...current, ...restored];
@@ -122,7 +129,18 @@ export default function App() {
         await cancelFor(previous.alarmIds ?? []);
       }
       const alarmIds = await scheduleFor(reminder).catch(() => [] as string[]);
-      const saved: Reminder = { ...reminder, alarmIds };
+      let saved: Reminder = { ...reminder, alarmIds };
+
+      // 先同步云端：成功就把 syncedAt 一起落本地，卡片上显示「云端已登记」
+      let syncError: string | undefined;
+      if (config.syncEnabled) {
+        const sync = await syncReminder(config, saved);
+        if (sync.ok) {
+          saved = { ...saved, syncedAt: Date.now() };
+        } else {
+          syncError = sync.error;
+        }
+      }
 
       const exists = reminders.some((item) => item.id === saved.id);
       const next = exists
@@ -134,11 +152,10 @@ export default function App() {
       setEditing(null);
       setOverdue(findOverduePending(next));
 
-      const sync = await syncReminder(config, saved);
-      if (config.syncEnabled && !sync.ok) {
+      if (syncError) {
         Alert.alert(
           '已保存在本机',
-          `云端同步失败：${sync.error ?? '未知错误'}\n\n到点仍会本地响，但微信/短信兜底暂时不会生效。`,
+          `云端同步失败：${syncError}\n\n到点仍会本地响，但微信兜底暂时不会生效。`,
         );
       }
     },
@@ -211,12 +228,21 @@ export default function App() {
       await saveConfig(nextConfig);
       if (nextConfig.syncEnabled) {
         const pending = reminders.filter((item) => item.status === 'pending');
+        const synced = new Map<string, number>();
         for (const item of pending) {
-          await syncReminder(nextConfig, item);
+          const result = await syncReminder(nextConfig, item);
+          if (result.ok) synced.set(item.id, Date.now());
+        }
+        if (synced.size > 0) {
+          await persist(
+            reminders.map((item) =>
+              synced.has(item.id) ? { ...item, syncedAt: synced.get(item.id) } : item,
+            ),
+          );
         }
       }
     },
-    [reminders],
+    [persist, reminders],
   );
 
   const handleRequestPermissions = useCallback(async () => {
@@ -249,6 +275,7 @@ export default function App() {
           groups={groups}
           alarmKitAvailable={alarmKitAvailable}
           syncEnabled={config.syncEnabled && config.apiBaseUrl.length > 0}
+          signDaysLeft={signDaysLeft}
           now={now}
           onNew={() => {
             setEditing(null);

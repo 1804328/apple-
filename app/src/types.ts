@@ -21,6 +21,8 @@ export interface Reminder {
   ackedAt?: number;
   /** 本地已排的闹钟/通知 id，用于取消重排 */
   alarmIds?: string[];
+  /** 最近一次成功同步到云端的时间 */
+  syncedAt?: number;
 }
 
 export interface ChannelConfig {

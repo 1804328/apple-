@@ -95,3 +95,26 @@ export function findOverduePending(list: Reminder[], now = Date.now(), windowMs 
     .sort((a, b) => a.fireAt - b.fireAt);
   return candidates[0] ?? null;
 }
+
+const INSTALL_KEY = '@strong-reminder/installedAt/v1';
+const SIGN_DAYS = 7;
+
+/**
+ * 免费签名有效期 7 天，从（重新）安装那一刻算起。
+ * 这里用首次启动时间近似安装时间——重装会清空 AsyncStorage，所以时间会重置。
+ */
+export async function getSignInfo(now = Date.now()): Promise<{
+  installedAt: number;
+  expiresAt: number;
+  daysLeft: number;
+}> {
+  const raw = await AsyncStorage.getItem(INSTALL_KEY);
+  let installedAt = raw ? Number(raw) : 0;
+  if (!installedAt || Number.isNaN(installedAt)) {
+    installedAt = now;
+    await AsyncStorage.setItem(INSTALL_KEY, String(installedAt));
+  }
+  const expiresAt = installedAt + SIGN_DAYS * DAY_MS;
+  const daysLeft = Math.max(0, Math.ceil((expiresAt - now) / DAY_MS));
+  return { installedAt, expiresAt, daysLeft };
+}
