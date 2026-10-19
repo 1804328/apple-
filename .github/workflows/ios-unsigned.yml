@@ -32,17 +32,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 选择 Xcode 26（AlarmKit 需要 iOS 26 SDK）
+      - name: 选择 Xcode（需要已安装 iOS 26 平台）
         run: |
           set -euo pipefail
-          ls -d /Applications/Xcode*.app
-          XCODE="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | head -1)"
-          if [ -z "$XCODE" ]; then
-            XCODE="$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          ls -d /Applications/Xcode*.app || true
+          echo "--- 默认 Xcode ---"
+          xcodebuild -version || true
+
+          DEFAULT_MAJOR="$(xcodebuild -version 2>/dev/null | head -1 | sed -E 's/^Xcode ([0-9]+).*/\1/' || true)"
+          if [ -n "${DEFAULT_MAJOR:-}" ] && [ "${DEFAULT_MAJOR}" -ge 26 ] 2>/dev/null; then
+            # 默认 Xcode 就是 26.x：用它最稳，镜像只为默认版本预装 iOS 平台组件
+            echo "默认 Xcode 版本 ${DEFAULT_MAJOR}.x，直接使用"
+          else
+            # 否则挑版本号最大的 26.x（注意按版本排序，不能按字母序取 head）
+            XCODE="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)"
+            if [ -n "${XCODE}" ]; then
+              echo "切换到 $XCODE"
+              sudo xcode-select -s "$XCODE/Contents/Developer"
+            fi
           fi
-          echo "using $XCODE"
-          sudo xcode-select -s "$XCODE/Contents/Developer"
+
+          echo "--- 使用中的 Xcode ---"
+          xcode-select -p
           xcodebuild -version
+          echo "--- 可用 SDK ---"
+          xcodebuild -showsdks || true
+          echo "--- iphoneos SDK 版本 ---"
           xcrun --sdk iphoneos --show-sdk-version
 
       - name: Setup Node
