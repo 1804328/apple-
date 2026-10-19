@@ -3,7 +3,11 @@
 #   1) npx --yes wrangler@4 login
 #   2) powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 
-$ErrorActionPreference = 'Stop'
+# 注意：不要用全局 Stop。wrangler 会往 stderr 打 warning，
+# 在 Stop 模式下会被 PowerShell 当成致命错误而中断脚本。
+$ErrorActionPreference = 'Continue'
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+
 Set-Location $PSScriptRoot
 
 $TOML = Join-Path $PSScriptRoot 'wrangler.toml'
@@ -15,10 +19,17 @@ function Step($text) {
   Write-Host "== $text ==" -ForegroundColor Cyan
 }
 
-function Run($cmd) {
+function Run($cmd, [switch]$AllowFail) {
   Write-Host "> $cmd" -ForegroundColor DarkGray
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
   $out = Invoke-Expression "$cmd 2>&1" | Out-String
+  $code = $LASTEXITCODE
+  $ErrorActionPreference = $prev
   Write-Host $out
+  if (-not $AllowFail -and $code -ne 0) {
+    throw "命令失败（exit $code）：$cmd"
+  }
   return $out
 }
 
@@ -33,8 +44,8 @@ if (-not (Test-Path $TOML)) {
   throw "找不到 wrangler.toml，请把本脚本放在 server 目录下运行"
 }
 
-$who = Run "npx --yes wrangler@4 whoami"
-if ($who -match 'not authenticated' -or $who -match 'not logged in') {
+$who = Run "npx --yes wrangler@4 whoami" -AllowFail
+if ($who -match 'not authenticated' -or $who -match 'not logged in' -or $who -match 'You are not') {
   Write-Host "尚未登录 Cloudflare。先执行： npx --yes wrangler@4 login" -ForegroundColor Yellow
   exit 1
 }
@@ -44,13 +55,13 @@ Step "1/5 准备 D1 数据库"
 $tomlText = Get-Content $TOML -Raw
 
 if ($tomlText -match 'REPLACE_ME') {
-  $create = Run "npx --yes wrangler@4 d1 create $D1_NAME"
+  $create = Run "npx --yes wrangler@4 d1 create $D1_NAME" -AllowFail
   if ($create -match '"database_id"\s*:\s*"([0-9a-fA-F-]{36})"') {
     $dbId = $Matches[1]
   } elseif ($create -match 'database_id\s*=\s*"([0-9a-fA-F-]{36})"') {
     $dbId = $Matches[1]
   } else {
-    throw "没能从 d1 create 输出里解析出 database_id，请手动填进 wrangler.toml 后重跑"
+    throw "没能从 d1 create 输出解析出 database_id。请打开 Cloudflare 控制台 D1 页面复制 id，填进 wrangler.toml 的 database_id 后重跑"
   }
   Write-Host "database_id = $dbId" -ForegroundColor Green
   $tomlText = $tomlText -replace 'database_id\s*=\s*"[^"]*"', ('database_id = "' + $dbId + '"')
@@ -60,11 +71,11 @@ if ($tomlText -match 'REPLACE_ME') {
 }
 
 # ---------------------------------------------------------------- 2. 建表
-Step "2/5 建表"
+Step "2/5 建表（D1 建表期间数据库会短暂不可用，正常）"
 Run "npx --yes wrangler@4 d1 execute $D1_NAME --remote --file=./schema.sql --yes" | Out-Null
 
 # ---------------------------------------------------------------- 3. 首次部署
-Step "3/5 首次部署（让 Worker 先存在，才能写 secret）"
+Step "3/5 首次部署（先让 Worker 存在，才能写 secret）"
 $deployOut = Run "npx --yes wrangler@4 deploy"
 
 $workerUrl = $null
@@ -72,7 +83,7 @@ if ($deployOut -match '(https://[a-z0-9.-]+\.workers\.dev)') {
   $workerUrl = $Matches[1]
 }
 if (-not $workerUrl) {
-  throw "没能从 deploy 输出里解析出 workers.dev 地址，请看上面日志"
+  throw "没能从 deploy 输出解析出 workers.dev 地址，请看上面日志"
 }
 Write-Host "Worker 地址：$workerUrl" -ForegroundColor Green
 
@@ -83,7 +94,7 @@ $apiKey = Read-Host "API_KEY（回车用默认）"
 if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = $DEFAULT_API_KEY }
 
 Write-Host ""
-Write-Host "企业微信里：群 → ··· → 群机器人 → 复制 Webhook 地址"
+Write-Host "企业微信里：群 -> ... -> 群机器人 -> 复制 Webhook 地址"
 Write-Host "格式：https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
 $webhook = (Read-Host "粘贴企业微信 Webhook").Trim()
 if ($webhook -notmatch '^https://qyapi\.weixin\.qq\.com/cgi-bin/webhook/send\?key=') {
