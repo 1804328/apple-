@@ -1,7 +1,6 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
 import React, { useMemo, useState } from 'react';
 import {
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -100,10 +99,7 @@ export default function NewReminderScreen({ onCancel, onSave }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <View style={styles.root}>
       <View style={styles.header}>
         <Pressable onPress={onCancel} hitSlop={12}>
           <Text style={styles.headerGhost}>取消</Text>
@@ -114,7 +110,11 @@ export default function NewReminderScreen({ onCancel, onSave }: Props) {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
         <Text style={styles.label}>提醒内容</Text>
         <TextInput
           value={title}
@@ -122,7 +122,6 @@ export default function NewReminderScreen({ onCancel, onSave }: Props) {
           placeholder="例如：10/25 前提交材料"
           placeholderTextColor={colors.textFaint}
           style={styles.titleInput}
-          autoFocus
         />
 
         <Text style={styles.label}>什么时候</Text>
@@ -220,7 +219,7 @@ export default function NewReminderScreen({ onCancel, onSave }: Props) {
           到点由系统闹钟响铃（iOS 26+），没确认会自动升级到微信；短信/电话需要服务器开启对应通道。
         </Text>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

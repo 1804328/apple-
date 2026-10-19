@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, SafeAreaView, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
 import ListScreen from './src/screens/ListScreen';
@@ -152,7 +152,7 @@ export default function App() {
   const { upcoming, finished } = splitReminders(reminders);
 
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
       {screen === 'list' ? (
         <ListScreen
@@ -180,7 +180,7 @@ export default function App() {
           onRequestPermissions={handleRequestPermissions}
         />
       ) : null}
-    </View>
+    </SafeAreaView>
   );
 }
 
