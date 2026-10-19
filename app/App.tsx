@@ -8,6 +8,7 @@ import NewReminderScreen from './src/screens/NewReminderScreen';
 import AnniversaryScreen from './src/screens/AnniversaryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import OverdueScreen from './src/screens/OverdueScreen';
+import ErrorBoundary from './src/components/ErrorBoundary';
 import { colors } from './src/theme';
 import type { ChannelConfig, Reminder } from './src/types';
 import {
@@ -34,7 +35,7 @@ type Screen = 'list' | 'new' | 'settings' | 'anniversary';
 
 const SNOOZE_MS = 5 * 60 * 1000;
 
-export default function App() {
+function AppInner() {
   const [ready, setReady] = useState(false);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [config, setConfig] = useState<ChannelConfig>(DEFAULT_CONFIG);
@@ -157,19 +158,45 @@ export default function App() {
       if (target && target.status === 'pending') setOverdue(target);
     };
 
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data as { reminderId?: string } | undefined;
-      openFromNotification(data?.reminderId);
-    });
+    let subscription: { remove: () => void } | undefined;
+    try {
+      if (typeof Notifications.addNotificationResponseReceivedListener === 'function') {
+        subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+          const data = response.notification.request.content.data as { reminderId?: string } | undefined;
+          openFromNotification(data?.reminderId);
+        });
+      }
 
-    Notifications.getLastNotificationResponseAsync?.()
-      .then((response) => {
-        const data = response?.notification.request.content.data as { reminderId?: string } | undefined;
-        openFromNotification(data?.reminderId);
-      })
-      .catch(() => undefined);
+      // 冷启动从通知进入：不同 SDK 版本 API 名/行为不完全一致，这里做兼容保护
+      const readLast = (Notifications as unknown as {
+        getLastNotificationResponseAsync?: () => Promise<unknown>;
+        getLastNotificationResponse?: () => unknown;
+      });
+      const maybePromise =
+        typeof readLast.getLastNotificationResponseAsync === 'function'
+          ? readLast.getLastNotificationResponseAsync()
+          : undefined;
 
-    return () => sub.remove();
+      if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
+        (maybePromise as Promise<unknown>)
+          .then((response) => {
+            const data = (response as { notification?: { request?: { content?: { data?: unknown } } } } | null)
+              ?.notification?.request?.content?.data as { reminderId?: string } | undefined;
+            openFromNotification(data?.reminderId);
+          })
+          .catch(() => undefined);
+      }
+    } catch (err) {
+      console.warn('[app] notification listener setup failed', err);
+    }
+
+    return () => {
+      try {
+        subscription?.remove();
+      } catch {
+        // ignore
+      }
+    };
   }, []);
 
   const persist = useCallback(async (next: Reminder[]) => {
@@ -454,3 +481,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
 });
+
+/** 用错误边界兜底：渲染出错时显示错误而不是直接闪退 */
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppInner />
+    </ErrorBoundary>
+  );
+}
