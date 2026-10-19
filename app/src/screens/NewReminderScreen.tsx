@@ -11,9 +11,9 @@ import {
   View,
 } from 'react-native';
 
-import { colors, radius, spacing } from '../theme';
-import { formatDateTime, mergeDate, mergeTime, stepsForLevel } from '../lib/time';
 import CalendarPicker from '../components/CalendarPicker';
+import { colors, levelColors, radius, spacing } from '../theme';
+import { formatDateTime, mergeDate, mergeTime, stepsForLevel } from '../lib/time';
 import type { Reminder, RepeatRule } from '../types';
 
 interface Props {
@@ -53,12 +53,11 @@ function stepLabel(afterSec: number): string {
     return `提前 ${Math.round(abs / 60)} 分钟`;
   }
   if (afterSec === 0) return '到点';
-  const abs = afterSec;
-  if (abs >= 3600) return `+${Math.round(abs / 3600)} 小时`;
-  return `+${Math.round(abs / 60)} 分钟`;
+  if (afterSec >= 3600) return `+${Math.round(afterSec / 3600)} 小时`;
+  return `+${Math.round(afterSec / 60)} 分钟`;
 }
 
-type PresetKind = 'hour' | 'tonight' | 'tomorrow' | 'in3days' | 'nextMonday' | 'nextMonthFirst';
+type PresetKind = 'hour' | 'tonight' | 'tomorrow' | 'nextMonday' | 'in3days' | 'nextMonthFirst';
 
 function presetDate(kind: PresetKind): Date {
   if (kind === 'hour') {
@@ -78,20 +77,18 @@ function presetDate(kind: PresetKind): Date {
     t.setHours(9, 0, 0, 0);
     return t;
   }
+  if (kind === 'nextMonday') {
+    const t = new Date();
+    t.setHours(9, 0, 0, 0);
+    t.setDate(t.getDate() + (((8 - t.getDay()) % 7) || 7));
+    return t;
+  }
   if (kind === 'in3days') {
     const t = new Date();
     t.setDate(t.getDate() + 3);
     t.setHours(9, 0, 0, 0);
     return t;
   }
-  if (kind === 'nextMonday') {
-    const t = new Date();
-    const delta = ((8 - t.getDay()) % 7) || 7;
-    t.setDate(t.getDate() + delta);
-    t.setHours(9, 0, 0, 0);
-    return t;
-  }
-  // nextMonthFirst
   const t = new Date();
   t.setMonth(t.getMonth() + 1, 1);
   t.setHours(9, 0, 0, 0);
@@ -108,6 +105,7 @@ export default function NewReminderScreen({ onCancel, onSave, initial, hardcoreA
   const [repeat, setRepeat] = useState<RepeatRule>(initial?.repeat ?? 'none');
   const [hardcore, setHardcore] = useState(initial?.unlock === 'math');
   const [showAndroidPicker, setShowAndroidPicker] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 已经过去的前置预警不用排（比如 3 小时后的事不该出现「提前 1 天」）
@@ -163,168 +161,192 @@ export default function NewReminderScreen({ onCancel, onSave, initial, hardcoreA
         keyboardDismissMode="on-drag"
         automaticallyAdjustKeyboardInsets
       >
-        <Text style={styles.label}>提醒内容</Text>
-        <TextInput
-          value={title}
-          onChangeText={setTitle}
-          placeholder="例如：10/25 前提交材料"
-          placeholderTextColor={colors.textFaint}
-          style={styles.titleInput}
-        />
-
-        <Text style={styles.label}>什么时候</Text>
-        <View style={styles.presetRow}>
-          <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('hour'))}>
-            <Text style={styles.presetText}>1 小时后</Text>
-          </Pressable>
-          <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('tonight'))}>
-            <Text style={styles.presetText}>今晚 20:00</Text>
-          </Pressable>
-          <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('tomorrow'))}>
-            <Text style={styles.presetText}>明天 09:00</Text>
-          </Pressable>
+        <View style={styles.card}>
+          <Text style={styles.cardLabel}>提醒内容</Text>
+          <TextInput
+            value={title}
+            onChangeText={setTitle}
+            placeholder="例如：10/25 前提交材料"
+            placeholderTextColor={colors.textFaint}
+            style={styles.titleInput}
+          />
         </View>
 
-        <View style={styles.presetRow}>
-          <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('in3days'))}>
-            <Text style={styles.presetText}>3 天后</Text>
-          </Pressable>
-          <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('nextMonday'))}>
-            <Text style={styles.presetText}>下周一</Text>
-          </Pressable>
-          <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('nextMonthFirst'))}>
-            <Text style={styles.presetText}>下月 1 号</Text>
-          </Pressable>
-        </View>
-
-        {Platform.OS === 'ios' ? (
-          <>
-            <CalendarPicker
-              value={fireAt}
-              onChange={(date) => setFireAt((prev) => mergeDate(prev, date))}
-            />
-            <View style={styles.timeRow}>
-              <Text style={styles.timeLabel}>时间</Text>
-              <DateTimePicker
-                value={fireAt}
-                mode="time"
-                display="compact"
-                locale="zh-CN"
-                themeVariant="dark"
-                onChange={(_event, date) => {
-                  if (date) setFireAt((prev) => mergeTime(prev, date));
-                }}
-              />
-            </View>
-          </>
-        ) : (
-          <>
-            <Pressable style={styles.androidTime} onPress={() => setShowAndroidPicker(true)}>
-              <Text style={styles.androidTimeText}>{formatDateTime(fireAt.getTime())}</Text>
-              <Text style={styles.androidTimeHint}>点按修改</Text>
-            </Pressable>
-            {showAndroidPicker ? (
-              <DateTimePicker
-                value={fireAt}
-                mode="datetime"
-                display="default"
-                onChange={(_event, date) => {
-                  setShowAndroidPicker(false);
-                  if (date) setFireAt(date);
-                }}
-              />
-            ) : null}
-          </>
-        )}
-
-        <Text style={styles.label}>强制度</Text>
-        <View style={styles.forceRow}>
-          {FORCE_OPTIONS.map((option) => {
-            const active = option.level === forceLevel;
-            return (
-              <Pressable
-                key={option.level}
-                style={[styles.forceChip, active && styles.forceChipActive]}
-                onPress={() => setForceLevel(option.level)}
-              >
-                <Text style={[styles.forceLabel, active && styles.forceLabelActive]}>{option.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <Text style={styles.forceDesc}>
-          {FORCE_OPTIONS.find((o) => o.level === forceLevel)?.desc}
-        </Text>
-
-        <Text style={styles.label}>重复</Text>
-        <View style={styles.forceRow}>
-          {REPEAT_OPTIONS.map((option) => {
-            const active = option.value === repeat;
-            return (
-              <Pressable
-                key={option.value}
-                style={[styles.forceChip, active && styles.forceChipActive]}
-                onPress={() => setRepeat(option.value)}
-              >
-                <Text style={[styles.forceLabel, active && styles.forceLabelActive]}>{option.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <Text style={styles.forceDesc}>
-          {repeat === 'none'
-            ? '只提醒这一次'
-            : `完成后自动滚到下一个周期（${repeat === 'weekly' ? '下周' : repeat === 'monthly' ? '下月' : '明年'}同一天）`}
-        </Text>
-
-        {hardcoreAvailable ? (
-          <View style={styles.switchRow}>
-            <View style={styles.switchTextWrap}>
-              <Text style={styles.switchLabel}>强制模式（数学题解锁）</Text>
-              <Text style={styles.switchHint}>
-                到点后连环响铃，必须在 App 里做对 3 道题才能确认
-              </Text>
-            </View>
-            <Switch
-              value={hardcore}
-              onValueChange={setHardcore}
-              trackColor={{ false: '#2a3442', true: '#2f5da8' }}
-              thumbColor={hardcore ? colors.accent : '#8b9bb0'}
-            />
+        <View style={styles.card}>
+          <View style={styles.cardHead}>
+            <Text style={styles.cardLabel}>时间</Text>
+            <Text style={styles.cardValue}>{formatDateTime(fireAt.getTime())}</Text>
           </View>
+
+          <View style={styles.presetRow}>
+            <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('hour'))}>
+              <Text style={styles.presetText}>1 小时后</Text>
+            </Pressable>
+            <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('tonight'))}>
+              <Text style={styles.presetText}>今晚</Text>
+            </Pressable>
+            <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('tomorrow'))}>
+              <Text style={styles.presetText}>明天</Text>
+            </Pressable>
+            <Pressable style={styles.preset} onPress={() => setFireAt(presetDate('nextMonday'))}>
+              <Text style={styles.presetText}>下周一</Text>
+            </Pressable>
+          </View>
+
+          {Platform.OS === 'ios' ? (
+            <>
+              <CalendarPicker
+                value={fireAt}
+                onChange={(date) => setFireAt((prev) => mergeDate(prev, date))}
+              />
+              <View style={styles.timeRow}>
+                <Text style={styles.timeLabel}>时间</Text>
+                <DateTimePicker
+                  value={fireAt}
+                  mode="time"
+                  display="compact"
+                  locale="zh-CN"
+                  themeVariant="dark"
+                  onChange={(_event, date) => {
+                    if (date) setFireAt((prev) => mergeTime(prev, date));
+                  }}
+                />
+              </View>
+            </>
+          ) : (
+            <>
+              <Pressable style={styles.androidTime} onPress={() => setShowAndroidPicker(true)}>
+                <Text style={styles.androidTimeText}>{formatDateTime(fireAt.getTime())}</Text>
+                <Text style={styles.androidTimeHint}>点按修改</Text>
+              </Pressable>
+              {showAndroidPicker ? (
+                <DateTimePicker
+                  value={fireAt}
+                  mode="datetime"
+                  display="default"
+                  onChange={(_event, date) => {
+                    setShowAndroidPicker(false);
+                    if (date) setFireAt(date);
+                  }}
+                />
+              ) : null}
+            </>
+          )}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardLabel}>提醒方式</Text>
+
+          <Text style={styles.subLabel}>强制度</Text>
+          <View style={styles.chipRow}>
+            {FORCE_OPTIONS.map((option) => {
+              const active = option.level === forceLevel;
+              const accent = levelColors[option.level] ?? colors.accent;
+              return (
+                <Pressable
+                  key={option.level}
+                  style={[
+                    styles.chip,
+                    active && { borderColor: accent, backgroundColor: colors.accentSoft },
+                  ]}
+                  onPress={() => setForceLevel(option.level)}
+                >
+                  <Text style={[styles.chipText, active && { color: accent, fontWeight: '700' }]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.hint}>
+            {FORCE_OPTIONS.find((o) => o.level === forceLevel)?.desc}
+          </Text>
+
+          <Text style={styles.subLabel}>重复</Text>
+          <View style={styles.chipRow}>
+            {REPEAT_OPTIONS.map((option) => {
+              const active = option.value === repeat;
+              return (
+                <Pressable
+                  key={option.value}
+                  style={[styles.chip, active && styles.chipActive]}
+                  onPress={() => setRepeat(option.value)}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.hint}>
+            {repeat === 'none'
+              ? '只提醒这一次'
+              : `完成后自动滚到下一个周期（${repeat === 'weekly' ? '下周' : repeat === 'monthly' ? '下月' : '明年'}同一天）`}
+          </Text>
+        </View>
+
+        <Pressable style={styles.moreToggle} onPress={() => setAdvanced((prev) => !prev)}>
+          <Text style={styles.moreText}>
+            {advanced ? '收起高级选项' : '高级选项：强制模式 / 升级链 / 备注'}
+          </Text>
+          <Text style={styles.moreCaret}>{advanced ? '▲' : '▼'}</Text>
+        </Pressable>
+
+        {advanced ? (
+          <>
+            {hardcoreAvailable ? (
+              <View style={styles.card}>
+                <View style={styles.switchLine}>
+                  <View style={styles.switchTextWrap}>
+                    <Text style={styles.switchLabel}>强制模式（数学题解锁）</Text>
+                    <Text style={styles.hint}>到点后连环响铃，必须在 App 里做对 3 道题才能确认</Text>
+                  </View>
+                  <Switch
+                    value={hardcore}
+                    onValueChange={setHardcore}
+                    trackColor={{ false: '#2a3442', true: '#2f5da8' }}
+                    thumbColor={hardcore ? colors.accent : '#8b9bb0'}
+                  />
+                </View>
+              </View>
+            ) : null}
+
+            <View style={styles.card}>
+              <Text style={styles.cardLabel}>升级链</Text>
+              <View style={styles.steps}>
+                {steps.map((step, index) => (
+                  <View key={`${step.afterSec}-${index}`} style={styles.stepChip}>
+                    <Text style={styles.stepText}>
+                      {stepLabel(step.afterSec)} · {step.channels.map((c) => CHANNEL_LABEL[c] ?? c).join('/')}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardLabel}>备注</Text>
+              <TextInput
+                value={note}
+                onChangeText={setNote}
+                placeholder="补充信息，会随提醒显示"
+                placeholderTextColor={colors.textFaint}
+                style={styles.noteInput}
+                multiline
+              />
+            </View>
+          </>
         ) : null}
 
-        <Text style={styles.label}>升级链预览</Text>
-        <View style={styles.steps}>
-          {steps.map((step, index) => (
-            <View key={`${step.afterSec}-${index}`} style={styles.stepChip}>
-              <Text style={styles.stepText}>
-                {stepLabel(step.afterSec)} · {step.channels.map((c) => CHANNEL_LABEL[c] ?? c).join('/')}
-              </Text>
-            </View>
-          ))}
-        </View>
-
-        <Text style={styles.label}>备注（可选）</Text>
-        <TextInput
-          value={note}
-          onChangeText={setNote}
-          placeholder="补充信息，会随提醒显示"
-          placeholderTextColor={colors.textFaint}
-          style={styles.noteInput}
-          multiline
-        />
-
         {error ? <Text style={styles.error}>{error}</Text> : null}
+      </ScrollView>
 
+      <View style={styles.footer}>
         <Pressable style={styles.saveButton} onPress={submit}>
           <Text style={styles.saveButtonText}>{initial ? '保存修改' : '创建提醒'}</Text>
         </Pressable>
-
-        <Text style={styles.footnote}>
-          到点由系统闹钟响铃（iOS 26+），没确认会自动升级到微信；短信/电话需要服务器开启对应通道。
-        </Text>
-      </ScrollView>
+      </View>
     </View>
   );
 }
@@ -337,41 +359,47 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   headerGhost: { color: colors.textDim, fontSize: 15 },
   headerTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },
   headerDone: { color: colors.accent, fontSize: 15, fontWeight: '700' },
-  body: { padding: spacing.lg, paddingBottom: 60 },
-  label: { color: colors.textFaint, fontSize: 12, letterSpacing: 1, marginBottom: spacing.sm, marginTop: spacing.lg },
-  titleInput: {
+  body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
+  card: {
     backgroundColor: colors.card,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  cardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  cardLabel: { color: colors.textFaint, fontSize: 12, letterSpacing: 0.5, marginBottom: spacing.sm },
+  cardValue: { color: colors.text, fontSize: 14, fontWeight: '600' },
+  titleInput: {
     color: colors.text,
     fontSize: 17,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.xs,
   },
   presetRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
   preset: {
+    flex: 1,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
     paddingVertical: 7,
+    alignItems: 'center',
   },
-  presetText: { color: colors.textDim, fontSize: 13 },
-  picker: { alignSelf: 'stretch' },
+  presetText: { color: colors.textDim, fontSize: 12 },
   timeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -379,9 +407,7 @@ const styles = StyleSheet.create({
   },
   timeLabel: { color: colors.textDim, fontSize: 14 },
   androidTime: {
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
     borderRadius: radius.md,
     padding: spacing.md,
     flexDirection: 'row',
@@ -390,61 +416,63 @@ const styles = StyleSheet.create({
   },
   androidTimeText: { color: colors.text, fontSize: 16 },
   androidTimeHint: { color: colors.textFaint, fontSize: 12 },
-  forceRow: { flexDirection: 'row', gap: spacing.sm },
-  forceChip: {
+  subLabel: { color: colors.textFaint, fontSize: 12, marginTop: spacing.sm, marginBottom: 6 },
+  chipRow: { flexDirection: 'row', gap: spacing.sm },
+  chip: {
     flex: 1,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    paddingVertical: spacing.md,
+    paddingVertical: 9,
     alignItems: 'center',
   },
-  forceChipActive: { borderColor: colors.accent, backgroundColor: '#16233a' },
-  forceLabel: { color: colors.textDim, fontSize: 14, fontWeight: '600' },
-  forceLabelActive: { color: colors.text },
-  forceDesc: { color: colors.textFaint, fontSize: 12, marginTop: spacing.sm },
-  switchRow: {
+  chipActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+  chipText: { color: colors.textDim, fontSize: 13, fontWeight: '600' },
+  chipTextActive: { color: colors.accentText },
+  hint: { color: colors.textFaint, fontSize: 11, lineHeight: 16, marginTop: spacing.xs },
+  moreToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginTop: spacing.lg,
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
   },
+  moreText: { color: colors.textDim, fontSize: 13 },
+  moreCaret: { color: colors.textFaint, fontSize: 9 },
+  switchLine: { flexDirection: 'row', alignItems: 'center' },
   switchTextWrap: { flex: 1, marginRight: spacing.md },
   switchLabel: { color: colors.text, fontSize: 15, fontWeight: '600' },
-  switchHint: { color: colors.textFaint, fontSize: 12, marginTop: 2 },
   steps: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   stepChip: {
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
     borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: 6,
   },
-  stepText: { color: colors.textDim, fontSize: 12 },
+  stepText: { color: colors.textDim, fontSize: 11 },
   noteInput: {
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
     borderRadius: radius.md,
     color: colors.text,
-    fontSize: 15,
+    fontSize: 14,
     padding: spacing.md,
-    minHeight: 80,
+    minHeight: 72,
     textAlignVertical: 'top',
   },
-  error: { color: colors.danger, fontSize: 13, marginTop: spacing.md },
+  error: { color: colors.danger, fontSize: 13, marginTop: spacing.sm },
+  footer: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    backgroundColor: colors.bg,
+  },
   saveButton: {
     backgroundColor: colors.accent,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     paddingVertical: spacing.md + 2,
     alignItems: 'center',
-    marginTop: spacing.xl,
   },
   saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  footnote: { color: colors.textFaint, fontSize: 12, lineHeight: 18, marginTop: spacing.md },
 });
