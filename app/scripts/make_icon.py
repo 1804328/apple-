@@ -20,18 +20,7 @@ for y in range(W):
         fill=tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3)),
     )
 
-# 中心柔光：与背景同色，仅极轻微提亮，避免出现可见的圆形边界
-bg_at_center = (17, 27, 47)
-for i in range(90, 0, -1):
-    t = i / 90
-    r = int(W * 0.58 * t)
-    k = (1 - t) ** 2
-    col = (
-        int(bg_at_center[0] + 5 * k),
-        int(bg_at_center[1] + 7 * k),
-        int(bg_at_center[2] + 12 * k),
-    )
-    d.ellipse([CX - r, CY - r, CX + r, CY + r], fill=col)
+# 纯渐变背景，避免柔和光晕在四角产生可见的圆形边界
 
 BLUE = (91, 155, 255)
 BLUE_LIGHT = (140, 190, 255)
@@ -104,22 +93,7 @@ hand(120, int(W * 0.2), int(W * 0.027))
 cr = int(W * 0.032)
 d.ellipse([CX - cr, CY - cr, CX + cr, CY + cr], fill=BLUE_LIGHT)
 
-# 红色角标 + 感叹号
-badge_r = int(W * 0.1)
-bx, by = int(W * 0.78), int(W * 0.145)
-d.ellipse([bx - badge_r, by - badge_r, bx + badge_r, by + badge_r], fill=RED)
-
-bar_w = int(W * 0.032)
-bar_top = by - int(W * 0.058)
-bar_bot = by + int(W * 0.012)
-d.rounded_rectangle(
-    [bx - bar_w // 2, bar_top, bx + bar_w // 2, bar_bot],
-    radius=bar_w // 2,
-    fill=WHITE,
-)
-dot_r = int(W * 0.017)
-dot_y = by + int(W * 0.046)
-d.ellipse([bx - dot_r, dot_y - dot_r, bx + dot_r, dot_y + dot_r], fill=WHITE)
+# 无角标版本：只保留干净的闹钟轮廓
 
 icon = img.resize((1024, 1024), Image.LANCZOS)
 icon.save(
