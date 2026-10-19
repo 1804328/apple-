@@ -88,8 +88,44 @@ export function groupReminders(list: Reminder[], now = Date.now()): ReminderGrou
   return groups;
 }
 
-/** 找到第一条「已到点但还没确认」的提醒（用于 App 内强制确认页） */
-export function findOverduePending(list: Reminder[], now = Date.now(), windowMs = DAY_MS): Reminder | null {
+export interface HorizonSplit {
+  near: ReminderGroups;
+  long: Reminder[];
+  nearCount: number;
+  longCount: number;
+}
+
+/**
+ * 按时间跨度拆成「近期 / 长期」：
+ *  - 30 天内（含已到点和历史）→ 近期
+ *  - 30 天以后的待触发 → 长期
+ * 临近的长期提醒（比如生日还剩 20 天）会自动升到近期，不会漏。
+ */
+export function splitHorizon(list: Reminder[], now = Date.now(), nearDays = 30): HorizonSplit {
+  const cutoff = now + nearDays * DAY_MS;
+  const nearList: Reminder[] = [];
+  const long: Reminder[] = [];
+
+  for (const item of list) {
+    if (item.status === 'pending' && item.fireAt > cutoff) {
+      long.push(item);
+    } else {
+      nearList.push(item);
+    }
+  }
+
+  long.sort((a, b) => a.fireAt - b.fireAt);
+  const near = groupReminders(nearList, now);
+
+  return {
+    near,
+    long,
+    nearCount: near.overdue.length + near.today.length + near.later.length,
+    longCount: long.length,
+  };
+}
+
+/** 找到第一条「已到点但还没确认」的提醒（用于 App 内强制确认页） */export function findOverduePending(list: Reminder[], now = Date.now(), windowMs = DAY_MS): Reminder | null {
   const candidates = list
     .filter((item) => item.status === 'pending' && item.fireAt <= now && now - item.fireAt < windowMs)
     .sort((a, b) => a.fireAt - b.fireAt);

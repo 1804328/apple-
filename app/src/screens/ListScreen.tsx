@@ -7,7 +7,8 @@ import type { Reminder } from '../types';
 import type { ReminderGroups } from '../store/reminders';
 
 interface Props {
-  groups: ReminderGroups;
+  nearGroups: ReminderGroups;
+  longList: Reminder[];
   alarmKitAvailable: boolean;
   syncEnabled: boolean;
   signDaysLeft: number;
@@ -19,6 +20,8 @@ interface Props {
   onOpenSettings: () => void;
   onOpenAnniversary: () => void;
 }
+
+type Tab = 'near' | 'long';
 
 const REPEAT_LABEL: Record<string, string> = {
   weekly: '每周',
@@ -79,9 +82,7 @@ function ReminderCard({
         {reminder.repeat && reminder.repeat !== 'none' ? (
           <Text style={styles.metaRepeat}>{REPEAT_LABEL[reminder.repeat] ?? ''}</Text>
         ) : null}
-        {reminder.pushCount ? (
-          <Text style={styles.metaPush}>已推送 {reminder.pushCount} 次</Text>
-        ) : null}
+        {reminder.pushCount ? <Text style={styles.metaPush}>已推送 {reminder.pushCount} 次</Text> : null}
         {syncEnabled && reminder.syncedAt ? <Text style={styles.metaSynced}>云端已登记</Text> : null}
       </View>
 
@@ -127,7 +128,8 @@ function Section({ label, tone, children }: { label: string; tone?: 'danger'; ch
 }
 
 export default function ListScreen({
-  groups,
+  nearGroups,
+  longList,
   alarmKitAvailable,
   syncEnabled,
   signDaysLeft,
@@ -139,7 +141,10 @@ export default function ListScreen({
   onOpenSettings,
   onOpenAnniversary,
 }: Props) {
-  const total = groups.overdue.length + groups.today.length + groups.later.length;
+  const [tab, setTab] = React.useState<Tab>('near');
+
+  const nearPending =
+    nearGroups.overdue.length + nearGroups.today.length + nearGroups.later.length;
 
   return (
     <View style={styles.root}>
@@ -147,9 +152,10 @@ export default function ListScreen({
         <View>
           <Text style={styles.title}>强提醒</Text>
           <Text style={styles.subtitle}>
-            {total > 0
-              ? `${total} 条待触发${groups.overdue.length > 0 ? ` · ${groups.overdue.length} 条待确认` : ''}`
-              : '还没有待触发的提醒'}
+            {nearPending > 0
+              ? `近期 ${nearPending} 条${nearGroups.overdue.length ? ` · ${nearGroups.overdue.length} 条待确认` : ''}`
+              : '近期没有待触发的提醒'}
+            {longList.length > 0 ? ` · 长期 ${longList.length} 条` : ''}
           </Text>
         </View>
         <View style={styles.headerActions}>
@@ -160,6 +166,25 @@ export default function ListScreen({
             <Text style={styles.settingsIcon}>⚙︎</Text>
           </Pressable>
         </View>
+      </View>
+
+      <View style={styles.segment}>
+        <Pressable
+          style={[styles.segmentItem, tab === 'near' && styles.segmentActive]}
+          onPress={() => setTab('near')}
+        >
+          <Text style={[styles.segmentText, tab === 'near' && styles.segmentTextActive]}>
+            近期{ nearPending > 0 ? ` ${nearPending}` : '' }
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.segmentItem, tab === 'long' && styles.segmentActive]}
+          onPress={() => setTab('long')}
+        >
+          <Text style={[styles.segmentText, tab === 'long' && styles.segmentTextActive]}>
+            长期{ longList.length > 0 ? ` ${longList.length}` : '' }
+          </Text>
+        </Pressable>
       </View>
 
       {!alarmKitAvailable ? (
@@ -178,86 +203,110 @@ export default function ListScreen({
         </View>
       ) : null}
 
-      {!syncEnabled ? (
-        <View style={[styles.banner, styles.bannerWarn]}>
-          <Text style={styles.bannerText}>云端升级未开启，微信兜底不会生效。</Text>
-        </View>
-      ) : null}
-
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-        {total === 0 && groups.finished.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>⏰</Text>
-            <Text style={styles.emptyTitle}>设一个不会错过的日期</Text>
-            <Text style={styles.emptyText}>
-              报名截止、还房租、签证到期——到点它会响，没确认就升级到微信。
-            </Text>
-          </View>
-        ) : null}
+        {tab === 'near' ? (
+          <>
+            {nearPending === 0 && nearGroups.finished.length === 0 ? (
+              <View style={styles.empty}>
+                <Text style={styles.emptyIcon}>⏰</Text>
+                <Text style={styles.emptyTitle}>近期没有要处理的事</Text>
+                <Text style={styles.emptyText}>
+                  点右下角「＋」建一条；生日、纪念日这类长期提醒在「长期」里。
+                </Text>
+              </View>
+            ) : null}
 
-        {groups.overdue.length > 0 ? (
-          <Section label="待确认" tone="danger">
-            {groups.overdue.map((item) => (
-              <ReminderCard
-                key={item.id}
-                reminder={item}
-                now={now}
-                syncEnabled={syncEnabled}
-                onAck={onAck}
-                onEdit={onEdit}
-                onDelete={onDelete}
-              />
-            ))}
-          </Section>
-        ) : null}
+            {nearGroups.overdue.length > 0 ? (
+              <Section label="待确认" tone="danger">
+                {nearGroups.overdue.map((item) => (
+                  <ReminderCard
+                    key={item.id}
+                    reminder={item}
+                    now={now}
+                    syncEnabled={syncEnabled}
+                    onAck={onAck}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                  />
+                ))}
+              </Section>
+            ) : null}
 
-        {groups.today.length > 0 ? (
-          <Section label="今天">
-            {groups.today.map((item) => (
-              <ReminderCard
-                key={item.id}
-                reminder={item}
-                now={now}
-                syncEnabled={syncEnabled}
-                onAck={onAck}
-                onEdit={onEdit}
-                onDelete={onDelete}
-              />
-            ))}
-          </Section>
-        ) : null}
+            {nearGroups.today.length > 0 ? (
+              <Section label="今天">
+                {nearGroups.today.map((item) => (
+                  <ReminderCard
+                    key={item.id}
+                    reminder={item}
+                    now={now}
+                    syncEnabled={syncEnabled}
+                    onAck={onAck}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                  />
+                ))}
+              </Section>
+            ) : null}
 
-        {groups.later.length > 0 ? (
-          <Section label="以后">
-            {groups.later.map((item) => (
-              <ReminderCard
-                key={item.id}
-                reminder={item}
-                now={now}
-                syncEnabled={syncEnabled}
-                onAck={onAck}
-                onEdit={onEdit}
-                onDelete={onDelete}
-              />
-            ))}
-          </Section>
-        ) : null}
+            {nearGroups.later.length > 0 ? (
+              <Section label="往后 30 天">
+                {nearGroups.later.map((item) => (
+                  <ReminderCard
+                    key={item.id}
+                    reminder={item}
+                    now={now}
+                    syncEnabled={syncEnabled}
+                    onAck={onAck}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                  />
+                ))}
+              </Section>
+            ) : null}
 
-        {groups.finished.length > 0 ? (
-          <Section label="历史">
-            {groups.finished.map((item) => (
-              <ReminderCard
-                key={item.id}
-                reminder={item}
-                now={now}
-                syncEnabled={syncEnabled}
-                onAck={onAck}
-                onEdit={onEdit}
-                onDelete={onDelete}
-              />
-            ))}
-          </Section>
-        ) : null}
+            {nearGroups.finished.length > 0 ? (
+              <Section label="历史">
+                {nearGroups.finished.map((item) => (
+                  <ReminderCard
+                    key={item.id}
+                    reminder={item}
+                    now={now}
+                    syncEnabled={syncEnabled}
+                    onAck={onAck}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                  />
+                ))}
+              </Section>
+            ) : null}
+          </>
+        ) : (
+          <>
+            {longList.length === 0 ? (
+              <View style={styles.empty}>
+                <Text style={styles.emptyIcon}>🎂</Text>
+                <Text style={styles.emptyTitle}>还没有长期提醒</Text>
+                <Text style={styles.emptyText}>
+                  生日、结婚纪念日、100 天这类，点右上角 🎂 一次生成。
+                </Text>
+              </View>
+            ) : (
+              <Section label="30 天以后 / 重复提醒">
+                {longList.map((item) => (
+                  <ReminderCard
+                    key={item.id}
+                    reminder={item}
+                    now={now}
+                    syncEnabled={syncEnabled}
+                    onAck={onAck}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                  />
+                ))}
+              </Section>
+            )}
+          </>
+        )}
       </ScrollView>
 
       <Pressable style={styles.fab} onPress={onNew}>
@@ -272,13 +321,14 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   title: { color: colors.text, fontSize: 30, fontWeight: '800', letterSpacing: 1 },
-  subtitle: { color: colors.textDim, fontSize: 13, marginTop: 2 },
+  subtitle: { color: colors.textDim, fontSize: 12, marginTop: 2 },
+  headerActions: { flexDirection: 'row', gap: spacing.sm },
   settingsButton: {
     width: 40,
     height: 40,
@@ -290,7 +340,25 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   settingsIcon: { color: colors.textDim, fontSize: 20 },
-  headerActions: { flexDirection: 'row', gap: spacing.sm },
+  segment: {
+    flexDirection: 'row',
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: 3,
+  },
+  segmentItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderRadius: radius.sm,
+  },
+  segmentActive: { backgroundColor: '#1c2a40' },
+  segmentText: { color: colors.textDim, fontSize: 14, fontWeight: '600' },
+  segmentTextActive: { color: colors.text },
   banner: {
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
@@ -327,13 +395,13 @@ const styles = StyleSheet.create({
   badgePending: { backgroundColor: '#1e2b3f' },
   badgeDone: { backgroundColor: '#1d2530' },
   badgeText: { color: colors.textDim, fontSize: 11, fontWeight: '600' },
-  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm, gap: spacing.md },
+  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm, gap: spacing.md, flexWrap: 'wrap' },
   metaTime: { color: colors.textDim, fontSize: 13 },
   metaCountdown: { color: colors.accent, fontSize: 13, fontWeight: '600' },
   metaOverdue: { color: colors.danger },
   metaRepeat: { color: '#9dc0ff', fontSize: 11 },
   metaPush: { color: colors.warn, fontSize: 11 },
-  metaSynced: { color: colors.ok, fontSize: 11, marginLeft: 'auto' },
+  metaSynced: { color: colors.ok, fontSize: 11 },
   note: { color: colors.textFaint, fontSize: 13, marginTop: spacing.xs, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   actionPrimary: {

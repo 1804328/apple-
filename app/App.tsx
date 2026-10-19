@@ -15,13 +15,13 @@ import {
   DEFAULT_CONFIG,
   findOverduePending,
   getSignInfo,
-  groupReminders,
   loadConfig,
   loadLastSync,
   loadReminders,
   saveConfig,
   saveLastSync,
   saveReminders,
+  splitHorizon,
 } from './src/store/reminders';
 import {
   alarmKitAvailable,
@@ -452,7 +452,7 @@ function AppInner() {
     return { alarmKit, notifications, total: alarmKit + notifications };
   }, [reminders]);
 
-  const groups = groupReminders(reminders, now);
+  const horizon = splitHorizon(reminders, now);
 
   // 注意：所有 hook 必须在任何提前 return 之前调用，否则会触发
   // "Rendered more hooks than during the previous render"
@@ -471,7 +471,8 @@ function AppInner() {
 
       {screen === 'list' ? (
         <ListScreen
-          groups={groups}
+          nearGroups={horizon.near}
+          longList={horizon.long}
           alarmKitAvailable={alarmKitAvailable}
           syncEnabled={config.syncEnabled && config.apiBaseUrl.length > 0}
           signDaysLeft={signDaysLeft}
