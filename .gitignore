@@ -16,3 +16,4 @@ app/build/
 app/Payload/
 *.ipa
 .keys/
+.ssh/
