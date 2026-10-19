@@ -20,6 +20,8 @@ interface Props {
   onCancel: () => void;
   onSave: (reminder: Reminder) => void;
   initial?: Reminder;
+  /** 全局开关：是否展示「强制模式」选项 */
+  hardcoreAvailable?: boolean;
 }
 
 const FORCE_OPTIONS = [
@@ -96,7 +98,7 @@ function presetDate(kind: PresetKind): Date {
   return t;
 }
 
-export default function NewReminderScreen({ onCancel, onSave, initial }: Props) {
+export default function NewReminderScreen({ onCancel, onSave, initial, hardcoreAvailable }: Props) {
   const [title, setTitle] = useState(initial?.title ?? '');
   const [note, setNote] = useState(initial?.note ?? '');
   const [fireAt, setFireAt] = useState<Date>(() =>
@@ -275,20 +277,22 @@ export default function NewReminderScreen({ onCancel, onSave, initial }: Props) 
             : `完成后自动滚到下一个周期（${repeat === 'weekly' ? '下周' : repeat === 'monthly' ? '下月' : '明年'}同一天）`}
         </Text>
 
-        <View style={styles.switchRow}>
-          <View style={styles.switchTextWrap}>
-            <Text style={styles.switchLabel}>强制模式（数学题解锁）</Text>
-            <Text style={styles.switchHint}>
-              到点后连环响铃，必须在 App 里做对 3 道题才能确认
-            </Text>
+        {hardcoreAvailable ? (
+          <View style={styles.switchRow}>
+            <View style={styles.switchTextWrap}>
+              <Text style={styles.switchLabel}>强制模式（数学题解锁）</Text>
+              <Text style={styles.switchHint}>
+                到点后连环响铃，必须在 App 里做对 3 道题才能确认
+              </Text>
+            </View>
+            <Switch
+              value={hardcore}
+              onValueChange={setHardcore}
+              trackColor={{ false: '#2a3442', true: '#2f5da8' }}
+              thumbColor={hardcore ? colors.accent : '#8b9bb0'}
+            />
           </View>
-          <Switch
-            value={hardcore}
-            onValueChange={setHardcore}
-            trackColor={{ false: '#2a3442', true: '#2f5da8' }}
-            thumbColor={hardcore ? colors.accent : '#8b9bb0'}
-          />
-        </View>
+        ) : null}
 
         <Text style={styles.label}>升级链预览</Text>
         <View style={styles.steps}>

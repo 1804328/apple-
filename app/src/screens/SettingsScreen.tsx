@@ -51,6 +51,7 @@ export default function SettingsScreen({
   const [apiBaseUrl, setApiBaseUrl] = useState(config.apiBaseUrl);
   const [apiKey, setApiKey] = useState(config.apiKey);
   const [syncEnabled, setSyncEnabled] = useState(config.syncEnabled);
+  const [hardcoreEnabled, setHardcoreEnabled] = useState(Boolean(config.hardcoreEnabled));
   const [testing, setTesting] = useState(false);
   const [testingChannel, setTestingChannel] = useState(false);
   const [permissions, setPermissions] = useState<{ notifications: boolean; alarmKit: boolean } | null>(
@@ -84,7 +85,12 @@ export default function SettingsScreen({
   }
 
   function save() {
-    onSave({ apiBaseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim(), syncEnabled });
+    onSave({
+      apiBaseUrl: apiBaseUrl.trim(),
+      apiKey: apiKey.trim(),
+      syncEnabled,
+      hardcoreEnabled,
+    });
     onBack();
   }
 
@@ -212,6 +218,22 @@ export default function SettingsScreen({
         <Pressable style={styles.secondaryButton} onPress={onRequestPermissions}>
           <Text style={styles.secondaryText}>重新申请权限</Text>
         </Pressable>
+
+        <Text style={styles.section}>提醒增强</Text>
+        <View style={styles.switchRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.switchLabel}>强制模式（数学题解锁）</Text>
+            <Text style={styles.switchHint}>
+              打开后，新建提醒时才出现这个选项；每条提醒仍需单独勾选
+            </Text>
+          </View>
+          <Switch
+            value={hardcoreEnabled}
+            onValueChange={setHardcoreEnabled}
+            trackColor={{ false: '#2a3442', true: '#2f5da8' }}
+            thumbColor={hardcoreEnabled ? colors.accent : '#8b9bb0'}
+          />
+        </View>
 
         <Text style={styles.section}>维护</Text>
         <Pressable style={styles.secondaryButton} onPress={onAddResignReminder}>

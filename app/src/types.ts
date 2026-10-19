@@ -40,4 +40,6 @@ export interface ChannelConfig {
   apiBaseUrl: string;
   apiKey: string;
   syncEnabled: boolean;
+  /** 全局开关：是否在新建页提供「强制模式（数学题解锁）」选项 */
+  hardcoreEnabled?: boolean;
 }

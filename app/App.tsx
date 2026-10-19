@@ -547,6 +547,7 @@ function AppInner() {
       {screen === 'new' ? (
         <NewReminderScreen
           initial={editing ?? undefined}
+          hardcoreAvailable={Boolean(config.hardcoreEnabled)}
           onCancel={() => {
             setEditing(null);
             setScreen('list');

@@ -19,6 +19,7 @@ export const DEFAULT_CONFIG: ChannelConfig = {
   apiBaseUrl: extra.apiBaseUrl ?? '',
   apiKey: extra.apiKey ?? '',
   syncEnabled: Boolean(extra.apiBaseUrl),
+  hardcoreEnabled: false,
 };
 
 export async function loadReminders(): Promise<Reminder[]> {
@@ -46,6 +47,7 @@ export async function loadConfig(): Promise<ChannelConfig> {
       apiBaseUrl: parsed.apiBaseUrl || DEFAULT_CONFIG.apiBaseUrl,
       apiKey: parsed.apiKey || DEFAULT_CONFIG.apiKey,
       syncEnabled: parsed.syncEnabled ?? DEFAULT_CONFIG.syncEnabled,
+      hardcoreEnabled: parsed.hardcoreEnabled ?? DEFAULT_CONFIG.hardcoreEnabled,
     };
   } catch {
     return { ...DEFAULT_CONFIG };
