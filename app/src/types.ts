@@ -34,6 +34,8 @@ export interface Reminder {
   alarmIds?: string[];
   /** 最近一次成功同步到云端的时间 */
   syncedAt?: number;
+  /** 云端同步失败，等待重试 */
+  needsSync?: boolean;
 }
 
 export interface ChannelConfig {

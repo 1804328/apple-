@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { colors, levelColors, radius, spacing } from '../theme';
 import { formatCountdown, formatFireLabel } from '../lib/time';
@@ -10,6 +10,8 @@ interface Props {
   nearGroups: ReminderGroups;
   longList: Reminder[];
   alarmKitAvailable: boolean;
+  /** 通知权限是否开启；关闭时首页直接提示，避免"默默不响" */
+  notificationsAllowed: boolean;
   syncEnabled: boolean;
   signDaysLeft: number;
   now: number;
@@ -19,6 +21,7 @@ interface Props {
   onDelete: (reminder: Reminder) => void;
   onOpenSettings: () => void;
   onOpenAnniversary: () => void;
+  onRefresh: () => Promise<void>;
 }
 
 type Tab = 'near' | 'long';
@@ -249,6 +252,7 @@ function ReminderCard({
           <Text style={styles.metaRepeat}>{REPEAT_LABEL[reminder.repeat] ?? ''}</Text>
         ) : null}
         {reminder.pushCount ? <Text style={styles.metaPush}>已推送 {reminder.pushCount} 次</Text> : null}
+        {reminder.needsSync ? <Text style={styles.metaUnsynced}>未同步</Text> : null}
         {syncEnabled && reminder.syncedAt ? <Text style={styles.metaSynced}>云端已登记</Text> : null}
       </View>
 
@@ -297,6 +301,7 @@ export default function ListScreen({
   nearGroups,
   longList,
   alarmKitAvailable,
+  notificationsAllowed,
   syncEnabled,
   signDaysLeft,
   now,
@@ -306,10 +311,21 @@ export default function ListScreen({
   onDelete,
   onOpenSettings,
   onOpenAnniversary,
+  onRefresh,
 }: Props) {
   const [tab, setTab] = React.useState<Tab>('near');
+  const [refreshing, setRefreshing] = React.useState(false);
   const [expandedGroups, setExpandedGroups] = React.useState<Set<string>>(new Set());
   const longGroups = React.useMemo(() => buildLongGroups(longList), [longList]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {
@@ -364,6 +380,15 @@ export default function ListScreen({
         </Pressable>
       </View>
 
+      {!notificationsAllowed ? (
+        <Pressable style={[styles.banner, styles.bannerDanger]} onPress={() => Linking.openSettings()}>
+          <Text style={styles.bannerText}>
+            通知权限被关闭：到点不会响。点这里去系统设置打开。
+          </Text>
+          <Text style={styles.bannerAction}>去设置 ›</Text>
+        </Pressable>
+      ) : null}
+
       {!alarmKitAvailable ? (
         <View style={styles.banner}>
           <Text style={styles.bannerText}>
@@ -380,7 +405,13 @@ export default function ListScreen({
         </View>
       ) : null}
 
-      <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} />
+        }
+      >
         {tab === 'near' ? (
           <>
             {nearPending === 0 && nearGroups.finished.length === 0 ? (
@@ -544,6 +575,8 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   bannerWarn: { borderColor: '#3a2f1a' },
+  bannerDanger: { borderColor: '#4a2222', backgroundColor: colors.dangerSoft },
+  bannerAction: { color: colors.danger, fontSize: 12, fontWeight: '700', marginTop: 6 },
   bannerText: { color: colors.textDim, fontSize: 12, lineHeight: 18 },
   list: { paddingHorizontal: spacing.lg, paddingBottom: 120 },
   sectionLabel: {
@@ -629,6 +662,7 @@ const styles = StyleSheet.create({
   metaOverdue: { color: colors.danger },
   metaRepeat: { color: '#9dc0ff', fontSize: 11 },
   metaPush: { color: colors.warn, fontSize: 11 },
+  metaUnsynced: { color: colors.warn, fontSize: 11, fontWeight: '600' },
   metaSynced: { color: colors.ok, fontSize: 11 },
   note: { color: colors.textFaint, fontSize: 13, marginTop: spacing.xs, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },

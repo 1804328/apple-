@@ -27,6 +27,7 @@ import {
 import {
   alarmKitAvailable,
   cancelFor,
+  getPermissionStatus,
   requestPermissions,
   scheduleFor,
   setupNotificationHandler,
@@ -48,6 +49,7 @@ function AppInner() {
   const [now, setNow] = useState(() => Date.now());
   const [signDaysLeft, setSignDaysLeft] = useState(7);
   const [lastSyncAt, setLastSyncAt] = useState<number | undefined>();
+  const [notificationsAllowed, setNotificationsAllowed] = useState(true);
 
   const remindersRef = useRef<Reminder[]>([]);
   useEffect(() => {
@@ -111,6 +113,11 @@ function AppInner() {
       setConfig(storedConfig);
       setReady(true);
       requestPermissions().catch(() => undefined);
+      getPermissionStatus()
+        .then((status) => {
+          if (mounted) setNotificationsAllowed(status.notifications);
+        })
+        .catch(() => undefined);
       getSignInfo()
         .then((info) => {
           if (mounted) setSignDaysLeft(info.daysLeft);
@@ -150,16 +157,12 @@ function AppInner() {
       const next = findOverduePending(remindersRef.current);
       if (next && !skippedIdsRef.current.has(next.id)) setOverdue(next);
 
-      // 回到前台顺手刷新云端状态（推送次数 / 其他设备改动）
-      if (configRef.current.syncEnabled) {
-        mergeCloud(configRef.current, remindersRef.current)
-          .then((merged) => {
-            setReminders(merged);
-            remindersRef.current = merged;
-            saveReminders(merged);
-          })
-          .catch(() => undefined);
-      }
+      getPermissionStatus()
+        .then((status) => setNotificationsAllowed(status.notifications))
+        .catch(() => undefined);
+
+      // 回到前台顺手刷新云端状态（推送次数 / 未同步重试）
+      refreshCloud().catch(() => undefined);
     });
 
     return () => {
@@ -239,6 +242,33 @@ function AppInner() {
     }
   }, []);
 
+  /** 拉云端 + 重试未同步的提醒（下拉刷新 / 回到前台都走这里） */
+  const refreshCloud = useCallback(async () => {
+    const cfg = configRef.current;
+    if (!cfg.syncEnabled) return;
+
+    let list = await mergeCloud(cfg, remindersRef.current);
+
+    const unsynced = list.filter((item) => item.status === 'pending' && item.needsSync);
+    if (unsynced.length > 0) {
+      const fixed = new Map<string, Reminder>();
+      for (const item of unsynced) {
+        const result = await syncReminder(cfg, item);
+        if (result.ok) {
+          fixed.set(item.id, { ...item, needsSync: false, syncedAt: Date.now() });
+        }
+      }
+      if (fixed.size > 0) {
+        list = list.map((item) => fixed.get(item.id) ?? item);
+        await markSync();
+      }
+    }
+
+    setReminders(list);
+    remindersRef.current = list;
+    await saveReminders(list);
+  }, [markSync, mergeCloud]);
+
   const handleSave = useCallback(
     (reminder: Reminder) =>
       runExclusive(`save:${reminder.id}`, async () => {
@@ -273,6 +303,7 @@ function AppInner() {
             await markSync();
           } else {
             syncError = sync.error;
+            saved = { ...saved, needsSync: true };
           }
         }
 
@@ -401,6 +432,40 @@ function AppInner() {
     [config, persist, runExclusive],
   );
 
+  /** 重复提醒：跳过本次，直接安排下一个周期 */
+  const handleSkip = useCallback(
+    (reminder: Reminder) =>
+      runExclusive(`skip:${reminder.id}`, async () => {
+        await cancelFor(reminder.alarmIds ?? []);
+        const fireAt = nextOccurrence(reminder.fireAt, reminder.repeat ?? 'weekly');
+        const rolled: Reminder = {
+          ...reminder,
+          fireAt,
+          status: 'pending',
+          ackedAt: undefined,
+          alarmIds: [],
+        };
+        const alarmIds = await scheduleFor(rolled).catch(() => [] as string[]);
+        let saved: Reminder = { ...rolled, alarmIds };
+
+        if (config.syncEnabled) {
+          const result = await syncReminder(config, saved);
+          if (result.ok) {
+            saved = { ...saved, syncedAt: Date.now(), needsSync: false };
+            await markSync();
+          } else {
+            saved = { ...saved, needsSync: true };
+          }
+        }
+
+        const next = remindersRef.current.map((item) => (item.id === saved.id ? saved : item));
+        await persist(next);
+        setOverdue(null);
+        setNow(Date.now());
+      }),
+    [config, markSync, persist, runExclusive],
+  );
+
   const handleDelete = useCallback(
     async (reminder: Reminder) => {
       Alert.alert('删除提醒', `确定删除「${reminder.title}」？`, [
@@ -526,9 +591,11 @@ function AppInner() {
           nearGroups={horizon.near}
           longList={horizon.long}
           alarmKitAvailable={alarmKitAvailable}
+          notificationsAllowed={notificationsAllowed}
           syncEnabled={config.syncEnabled && config.apiBaseUrl.length > 0}
           signDaysLeft={signDaysLeft}
           now={now}
+          onRefresh={refreshCloud}
           onNew={() => {
             setEditing(null);
             setScreen('new');
@@ -589,7 +656,12 @@ function AppInner() {
               }}
             />
           ) : (
-            <OverdueScreen reminder={overdue} onDone={handleAck} onSnooze={handleSnooze} />
+            <OverdueScreen
+              reminder={overdue}
+              onDone={handleAck}
+              onSnooze={handleSnooze}
+              onSkip={handleSkip}
+            />
           )}
         </View>
       ) : null}

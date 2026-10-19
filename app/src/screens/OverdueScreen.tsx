@@ -9,6 +9,8 @@ interface Props {
   reminder: Reminder;
   onDone: (reminder: Reminder) => void;
   onSnooze: (reminder: Reminder) => void;
+  /** 重复提醒专用：跳过本次，直接滚到下一个周期 */
+  onSkip?: (reminder: Reminder) => void;
 }
 
 /**
@@ -16,7 +18,9 @@ interface Props {
  * AlarmKit 的「完成」按钮不会回调 JS，所以到点后进 App 时用这个页面兜住确认动作，
  * 避免「响了但云端一直不知道你处理了」。
  */
-export default function OverdueScreen({ reminder, onDone, onSnooze }: Props) {
+export default function OverdueScreen({ reminder, onDone, onSnooze, onSkip }: Props) {
+  const repeatable = Boolean(reminder.repeat && reminder.repeat !== 'none');
+
   return (
     <View style={styles.root}>
       <View style={styles.badge}>
@@ -34,6 +38,11 @@ export default function OverdueScreen({ reminder, onDone, onSnooze }: Props) {
         <Pressable style={styles.snooze} onPress={() => onSnooze(reminder)}>
           <Text style={styles.snoozeText}>5 分钟后再提醒</Text>
         </Pressable>
+        {repeatable && onSkip ? (
+          <Pressable style={styles.skip} onPress={() => onSkip(reminder)}>
+            <Text style={styles.skipText}>跳过本次</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <Text style={styles.hint}>
@@ -84,6 +93,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   snoozeText: { color: colors.textDim, fontSize: 16, fontWeight: '600' },
+  skip: { alignSelf: 'center', paddingVertical: spacing.sm },
+  skipText: { color: colors.textFaint, fontSize: 13 },
   hint: {
     color: colors.textFaint,
     fontSize: 12,
