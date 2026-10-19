@@ -148,6 +148,17 @@ export async function saveLastSync(at = Date.now()): Promise<void> {
   await AsyncStorage.setItem(LAST_SYNC_KEY, String(at));
 }
 
+const ONBOARD_KEY = '@strong-reminder/onboarded/v1';
+
+export async function isOnboarded(): Promise<boolean> {
+  const raw = await AsyncStorage.getItem(ONBOARD_KEY);
+  return raw === '1';
+}
+
+export async function markOnboarded(): Promise<void> {
+  await AsyncStorage.setItem(ONBOARD_KEY, '1');
+}
+
 /**
  * 免费签名有效期 7 天，从（重新）安装那一刻算起。
  * 这里用首次启动时间近似安装时间——重装会清空 AsyncStorage，所以时间会重置。

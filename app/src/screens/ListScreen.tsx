@@ -1,5 +1,15 @@
 import React from 'react';
-import { Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Linking,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { colors, levelColors, radius, spacing } from '../theme';
 import { formatCountdown, formatFireLabel } from '../lib/time';
@@ -22,6 +32,7 @@ interface Props {
   onOpenSettings: () => void;
   onOpenAnniversary: () => void;
   onRefresh: () => Promise<void>;
+  onClearHistory: () => void;
 }
 
 type Tab = 'near' | 'long';
@@ -312,11 +323,31 @@ export default function ListScreen({
   onOpenSettings,
   onOpenAnniversary,
   onRefresh,
+  onClearHistory,
 }: Props) {
   const [tab, setTab] = React.useState<Tab>('near');
   const [refreshing, setRefreshing] = React.useState(false);
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  const [query, setQuery] = React.useState('');
   const [expandedGroups, setExpandedGroups] = React.useState<Set<string>>(new Set());
-  const longGroups = React.useMemo(() => buildLongGroups(longList), [longList]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = React.useMemo(() => {
+    if (!q) return { near: nearGroups, long: longList };
+    const match = (item: Reminder) => `${item.title} ${item.note}`.toLowerCase().includes(q);
+    return {
+      near: {
+        overdue: nearGroups.overdue.filter(match),
+        today: nearGroups.today.filter(match),
+        later: nearGroups.later.filter(match),
+        finished: nearGroups.finished.filter(match),
+      },
+      long: longList.filter(match),
+    };
+  }, [nearGroups, longList, q]);
+
+  const near = filtered.near;
+  const longGroups = React.useMemo(() => buildLongGroups(filtered.long), [filtered.long]);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -336,8 +367,7 @@ export default function ListScreen({
     });
   };
 
-  const nearPending =
-    nearGroups.overdue.length + nearGroups.today.length + nearGroups.later.length;
+  const nearPending = near.overdue.length + near.today.length + near.later.length;
 
   return (
     <View style={styles.root}>
@@ -346,12 +376,22 @@ export default function ListScreen({
           <Text style={styles.title}>强提醒</Text>
           <Text style={styles.subtitle}>
             {nearPending > 0
-              ? `近期 ${nearPending} 条${nearGroups.overdue.length ? ` · ${nearGroups.overdue.length} 条待确认` : ''}`
+              ? `近期 ${nearPending} 条${near.overdue.length ? ` · ${near.overdue.length} 条待确认` : ''}`
               : '近期没有待触发的提醒'}
-            {longList.length > 0 ? ` · 长期 ${longList.length} 条` : ''}
+            {filtered.long.length > 0 ? ` · 长期 ${filtered.long.length} 条` : ''}
           </Text>
         </View>
         <View style={styles.headerActions}>
+          <Pressable
+            style={styles.settingsButton}
+            onPress={() => {
+              setSearchOpen((prev) => !prev);
+              if (searchOpen) setQuery('');
+            }}
+            hitSlop={12}
+          >
+            <Text style={styles.settingsIcon}>🔍</Text>
+          </Pressable>
           <Pressable style={styles.settingsButton} onPress={onOpenAnniversary} hitSlop={12}>
             <Text style={styles.settingsIcon}>🎂</Text>
           </Pressable>
@@ -360,6 +400,25 @@ export default function ListScreen({
           </Pressable>
         </View>
       </View>
+
+      {searchOpen ? (
+        <View style={styles.searchRow}>
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="搜索提醒内容"
+            placeholderTextColor={colors.textFaint}
+            style={styles.searchInput}
+            autoFocus
+            returnKeyType="search"
+          />
+          {query.length > 0 ? (
+            <Pressable onPress={() => setQuery('')} hitSlop={8}>
+              <Text style={styles.searchClear}>清除</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       <View style={styles.segment}>
         <Pressable
@@ -375,7 +434,7 @@ export default function ListScreen({
           onPress={() => setTab('long')}
         >
           <Text style={[styles.segmentText, tab === 'long' && styles.segmentTextActive]}>
-            长期{ longList.length > 0 ? ` ${longList.length}` : '' }
+            长期{ filtered.long.length > 0 ? ` ${filtered.long.length}` : '' }
           </Text>
         </Pressable>
       </View>
@@ -414,19 +473,23 @@ export default function ListScreen({
       >
         {tab === 'near' ? (
           <>
-            {nearPending === 0 && nearGroups.finished.length === 0 ? (
+            {nearPending === 0 && near.finished.length === 0 ? (
               <View style={styles.empty}>
                 <Text style={styles.emptyIcon}>⏰</Text>
-                <Text style={styles.emptyTitle}>近期没有要处理的事</Text>
+                <Text style={styles.emptyTitle}>
+                  {q ? '没有匹配的提醒' : '近期没有要处理的事'}
+                </Text>
                 <Text style={styles.emptyText}>
-                  点右下角「＋」建一条；生日、纪念日这类长期提醒在「长期」里。
+                  {q
+                    ? '换个关键词，或清空搜索框。'
+                    : '点右下角「＋」建一条；生日、纪念日这类长期提醒在「长期」里。'}
                 </Text>
               </View>
             ) : null}
 
-            {nearGroups.overdue.length > 0 ? (
+            {near.overdue.length > 0 ? (
               <Section label="待确认" tone="danger">
-                {nearGroups.overdue.map((item) => (
+                {near.overdue.map((item) => (
                   <ReminderCard
                     key={item.id}
                     reminder={item}
@@ -440,9 +503,9 @@ export default function ListScreen({
               </Section>
             ) : null}
 
-            {nearGroups.today.length > 0 ? (
+            {near.today.length > 0 ? (
               <Section label="今天">
-                {nearGroups.today.map((item) => (
+                {near.today.map((item) => (
                   <ReminderCard
                     key={item.id}
                     reminder={item}
@@ -456,9 +519,9 @@ export default function ListScreen({
               </Section>
             ) : null}
 
-            {nearGroups.later.length > 0 ? (
+            {near.later.length > 0 ? (
               <Section label="往后 30 天">
-                {nearGroups.later.map((item) => (
+                {near.later.map((item) => (
                   <ReminderCard
                     key={item.id}
                     reminder={item}
@@ -472,9 +535,23 @@ export default function ListScreen({
               </Section>
             ) : null}
 
-            {nearGroups.finished.length > 0 ? (
-              <Section label="历史">
-                {nearGroups.finished.map((item) => (
+            {near.finished.length > 0 ? (
+              <View>
+                <View style={styles.sectionRow}>
+                  <Text style={styles.sectionLabel}>历史</Text>
+                  <Pressable
+                    hitSlop={8}
+                    onPress={() =>
+                      Alert.alert('清空历史', `删除 ${near.finished.length} 条已完成/错过的提醒？`, [
+                        { text: '取消', style: 'cancel' },
+                        { text: '清空', style: 'destructive', onPress: onClearHistory },
+                      ])
+                    }
+                  >
+                    <Text style={styles.sectionAction}>清空历史</Text>
+                  </Pressable>
+                </View>
+                {near.finished.map((item) => (
                   <ReminderCard
                     key={item.id}
                     reminder={item}
@@ -485,17 +562,19 @@ export default function ListScreen({
                     onDelete={onDelete}
                   />
                 ))}
-              </Section>
+              </View>
             ) : null}
           </>
         ) : (
           <>
-            {longList.length === 0 ? (
+            {longGroups.length === 0 ? (
               <View style={styles.empty}>
                 <Text style={styles.emptyIcon}>🎂</Text>
-                <Text style={styles.emptyTitle}>还没有长期提醒</Text>
+                <Text style={styles.emptyTitle}>{q ? '没有匹配的长期提醒' : '还没有长期提醒'}</Text>
                 <Text style={styles.emptyText}>
-                  生日、结婚纪念日、100 天这类，点右上角 🎂 一次生成。
+                  {q
+                    ? '换个关键词，或清空搜索框。'
+                    : '生日、结婚纪念日、100 天这类，点右上角 🎂 一次生成。'}
                 </Text>
               </View>
             ) : (
@@ -548,6 +627,31 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   settingsIcon: { color: colors.textDim, fontSize: 20 },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  searchInput: {
+    flex: 1,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    color: colors.text,
+    fontSize: 14,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 9,
+  },
+  searchClear: { color: colors.textDim, fontSize: 13 },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  sectionAction: { color: colors.textFaint, fontSize: 12 },
   segment: {
     flexDirection: 'row',
     marginHorizontal: spacing.lg,

@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, SafeAreaView, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  AppState,
+  Linking,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 
@@ -9,16 +19,19 @@ import AnniversaryScreen from './src/screens/AnniversaryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import OverdueScreen from './src/screens/OverdueScreen';
 import MathChallengeScreen from './src/screens/MathChallengeScreen';
+import OnboardingScreen from './src/screens/OnboardingScreen';
 import ErrorBoundary from './src/components/ErrorBoundary';
-import { colors } from './src/theme';
+import { colors, spacing } from './src/theme';
 import type { ChannelConfig, Reminder } from './src/types';
 import {
   DEFAULT_CONFIG,
   findOverduePending,
   getSignInfo,
+  isOnboarded,
   loadConfig,
   loadLastSync,
   loadReminders,
+  markOnboarded,
   saveConfig,
   saveLastSync,
   saveReminders,
@@ -33,6 +46,8 @@ import {
   setupNotificationHandler,
 } from './src/services/alarms';
 import { nextOccurrence, stepsForLevel } from './src/lib/time';
+import { parseDeepLink } from './src/lib/deeplink';
+import type { NewReminderDraft } from './src/lib/deeplink';
 import { ackOnServer, fetchPendingReminders, removeOnServer, syncReminder } from './src/services/api';
 
 type Screen = 'list' | 'new' | 'settings' | 'anniversary';
@@ -50,6 +65,10 @@ function AppInner() {
   const [signDaysLeft, setSignDaysLeft] = useState(7);
   const [lastSyncAt, setLastSyncAt] = useState<number | undefined>();
   const [notificationsAllowed, setNotificationsAllowed] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [draft, setDraft] = useState<NewReminderDraft | null>(null);
+  const [undo, setUndo] = useState<{ items: Reminder[] } | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const remindersRef = useRef<Reminder[]>([]);
   useEffect(() => {
@@ -112,6 +131,13 @@ function AppInner() {
 
       setConfig(storedConfig);
       setReady(true);
+
+      isOnboarded()
+        .then((done) => {
+          if (mounted && !done) setShowOnboarding(true);
+        })
+        .catch(() => undefined);
+
       requestPermissions().catch(() => undefined);
       getPermissionStatus()
         .then((status) => {
@@ -215,6 +241,31 @@ function AppInner() {
     return () => {
       try {
         subscription?.remove();
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
+
+  // 深链：strongreminder://new?title=...&date=...&time=... 直接打开新建页并预填
+  useEffect(() => {
+    const openFromUrl = (url: string | null | undefined) => {
+      if (!url) return;
+      const parsed = parseDeepLink(url);
+      if (!parsed) return;
+      setDraft(parsed);
+      setEditing(null);
+      setScreen('new');
+    };
+
+    Linking.getInitialURL()
+      .then((url) => openFromUrl(url))
+      .catch(() => undefined);
+
+    const sub = Linking.addEventListener('url', (event) => openFromUrl(event.url));
+    return () => {
+      try {
+        sub.remove();
       } catch {
         // ignore
       }
@@ -479,11 +530,62 @@ function AppInner() {
               await persist(remindersRef.current.filter((item) => item.id !== reminder.id));
               setOverdue((prev) => (prev?.id === reminder.id ? null : prev));
               if (config.syncEnabled) removeOnServer(config, reminder.id).catch(() => undefined);
+
+              // 5 秒内可撤销
+              setUndo({ items: [reminder] });
+              if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+              undoTimerRef.current = setTimeout(() => setUndo(null), 5000);
             }),
         },
       ]);
     },
     [config, persist, runExclusive, reminders],
+  );
+
+  /** 撤销删除：恢复提醒并重新排闹钟 */
+  const handleUndo = useCallback(async () => {
+    const pendingUndo = undo;
+    setUndo(null);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    if (!pendingUndo) return;
+
+    const restored: Reminder[] = [];
+    for (const item of pendingUndo.items) {
+      const alarmIds = await scheduleFor(item).catch(() => [] as string[]);
+      restored.push({ ...item, alarmIds });
+    }
+
+    const byId = new Map(remindersRef.current.map((item) => [item.id, item]));
+    for (const item of restored) byId.set(item.id, item);
+    const next = [...byId.values()];
+    await persist(next);
+    setOverdue(findOverduePending(next));
+
+    if (config.syncEnabled) {
+      for (const item of restored) {
+        syncReminder(config, item).catch(() => undefined);
+      }
+    }
+  }, [config, persist, undo]);
+
+  /** 清空历史（已完成 / 已错过） */
+  const handleClearHistory = useCallback(
+    () =>
+      runExclusive('history:clear', async () => {
+        const removed = remindersRef.current.filter((item) => item.status !== 'pending');
+        if (removed.length === 0) return;
+
+        const next = remindersRef.current.filter((item) => item.status === 'pending');
+        await persist(next);
+        setOverdue((prev) => (prev && prev.status !== 'pending' ? null : prev));
+
+        if (config.syncEnabled) {
+          for (const item of removed) {
+            removeOnServer(config, item.id).catch(() => undefined);
+          }
+        }
+      }),
+    [config, persist, runExclusive],
   );
 
   const handleSaveConfig = useCallback(
@@ -596,8 +698,10 @@ function AppInner() {
           signDaysLeft={signDaysLeft}
           now={now}
           onRefresh={refreshCloud}
+          onClearHistory={handleClearHistory}
           onNew={() => {
             setEditing(null);
+            setDraft(null);
             setScreen('new');
           }}
           onAck={handleAck}
@@ -614,9 +718,11 @@ function AppInner() {
       {screen === 'new' ? (
         <NewReminderScreen
           initial={editing ?? undefined}
+          draft={draft}
           hardcoreAvailable={Boolean(config.hardcoreEnabled)}
           onCancel={() => {
             setEditing(null);
+            setDraft(null);
             setScreen('list');
           }}
           onSave={handleSave}
@@ -665,6 +771,28 @@ function AppInner() {
           )}
         </View>
       ) : null}
+
+      {showOnboarding ? (
+        <View style={styles.overlay}>
+          <OnboardingScreen
+            onDone={() => {
+              setShowOnboarding(false);
+              markOnboarded().catch(() => undefined);
+            }}
+          />
+        </View>
+      ) : null}
+
+      {undo ? (
+        <View style={styles.toast}>
+          <Text style={styles.toastText} numberOfLines={1}>
+            已删除「{undo.items[0]?.title ?? '提醒'}」
+          </Text>
+          <Pressable onPress={handleUndo} hitSlop={8}>
+            <Text style={styles.toastAction}>撤销</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -680,6 +808,23 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: colors.bg,
   },
+  toast: {
+    position: 'absolute',
+    left: spacing.xl,
+    right: spacing.xl,
+    bottom: 112,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1d2530',
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  toastText: { color: colors.text, fontSize: 13, flex: 1, marginRight: 12 },
+  toastAction: { color: colors.accentText, fontSize: 13, fontWeight: '700' },
 });
 
 /** 用错误边界兜底：渲染出错时显示错误而不是直接闪退 */

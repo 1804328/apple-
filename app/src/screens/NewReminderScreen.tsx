@@ -14,6 +14,7 @@ import {
 import CalendarPicker from '../components/CalendarPicker';
 import { colors, levelColors, radius, spacing } from '../theme';
 import { formatDateTime, mergeDate, mergeTime, stepsForLevel } from '../lib/time';
+import type { NewReminderDraft } from '../lib/deeplink';
 import type { Reminder, RepeatRule } from '../types';
 
 interface Props {
@@ -22,6 +23,8 @@ interface Props {
   initial?: Reminder;
   /** 全局开关：是否展示「强制模式」选项 */
   hardcoreAvailable?: boolean;
+  /** 深链 / 外部入口预填 */
+  draft?: NewReminderDraft | null;
 }
 
 const FORCE_OPTIONS = [
@@ -95,12 +98,20 @@ function presetDate(kind: PresetKind): Date {
   return t;
 }
 
-export default function NewReminderScreen({ onCancel, onSave, initial, hardcoreAvailable }: Props) {
-  const [title, setTitle] = useState(initial?.title ?? '');
+export default function NewReminderScreen({
+  onCancel,
+  onSave,
+  initial,
+  hardcoreAvailable,
+  draft,
+}: Props) {
+  const [title, setTitle] = useState(initial?.title ?? draft?.title ?? '');
   const [note, setNote] = useState(initial?.note ?? '');
-  const [fireAt, setFireAt] = useState<Date>(() =>
-    initial ? new Date(initial.fireAt) : presetDate('hour'),
-  );
+  const [fireAt, setFireAt] = useState<Date>(() => {
+    if (initial) return new Date(initial.fireAt);
+    if (draft?.fireAt) return new Date(draft.fireAt);
+    return presetDate('hour');
+  });
   const [forceLevel, setForceLevel] = useState(initial?.forceLevel ?? 3);
   const [repeat, setRepeat] = useState<RepeatRule>(initial?.repeat ?? 'none');
   const [hardcore, setHardcore] = useState(initial?.unlock === 'math');
