@@ -14,7 +14,7 @@ database_id = "e4d8410f-2364-416d-9411-1be57d16edb2"
 [vars]
 # Base URL used to build "ack" links inside WeChat/WeCom pushes.
 # Replace with the custom domain once it is bound to the Worker.
-PUBLIC_BASE_URL = "https://strong-reminder.1804328114.workers.dev"
+PUBLIC_BASE_URL = "https://ryanlewis.dpdns.org"
 
 # Secrets (set via `wrangler secret put`, never store here):
 #   API_KEY
