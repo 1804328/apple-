@@ -100,6 +100,7 @@ jobs:
           echo "scheme: $SCHEME"
 
           build_once() {
+            set -o pipefail
             xcodebuild \
               -workspace "$WORKSPACE" \
               -scheme "$SCHEME" \
@@ -110,13 +111,21 @@ jobs:
               CODE_SIGNING_ALLOWED=NO \
               CODE_SIGNING_REQUIRED=NO \
               CODE_SIGN_IDENTITY="" \
-              build
+              build 2>&1 | tee "$GITHUB_WORKSPACE/app/build.log"
+          }
+
+          summarize() {
+            echo "================ 错误摘要 ================"
+            grep -nE "error:|fatal error:|❌|Command .* failed|failed with a nonzero exit code" \
+              "$GITHUB_WORKSPACE/app/build.log" | tail -n 80 || true
+            echo "=========================================="
           }
 
           # 首选当前 Xcode；失败则按版本号从新到旧逐个尝试（镜像只为部分 Xcode 预装 iOS 平台）
           if build_once; then
             exit 0
           fi
+          summarize
           echo "=== 当前 Xcode 构建失败，尝试切换其它 Xcode 重试 ==="
           xcodebuild -showdestinations -workspace "$WORKSPACE" -scheme "$SCHEME" || true
 
@@ -128,6 +137,7 @@ jobs:
               echo "=== 使用 $XCODE 构建成功 ==="
               exit 0
             fi
+            summarize
           done
 
           echo "=== 所有候选 Xcode 均构建失败 ==="
