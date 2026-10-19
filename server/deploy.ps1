@@ -1,4 +1,4 @@
-# 一键部署：Cloudflare Worker + D1 + 企业微信通道
+﻿# 一键部署：Cloudflare Worker + D1 + 企业微信通道
 # 用法（在 server 目录）：
 #   1) npx --yes wrangler@4 login
 #   2) powershell -ExecutionPolicy Bypass -File .\deploy.ps1
@@ -27,20 +27,20 @@ function Write-Utf8NoBom($path, $text) {
   [System.IO.File]::WriteAllText($path, $text, $enc)
 }
 
-# ---------------------------------------------------------------- 0. 检查环境
-Step "0/6 检查 wrangler 与登录状态"
+# ---------------------------------------------------------------- 0. 环境
+Step "0/5 检查 wrangler 与登录状态"
 if (-not (Test-Path $TOML)) {
   throw "找不到 wrangler.toml，请把本脚本放在 server 目录下运行"
 }
 
 $who = Run "npx --yes wrangler@4 whoami"
-if ($who -match 'not authenticated' -or $who -match 'You are not logged in' -or $who -match 'not logged in') {
+if ($who -match 'not authenticated' -or $who -match 'not logged in') {
   Write-Host "尚未登录 Cloudflare。先执行： npx --yes wrangler@4 login" -ForegroundColor Yellow
   exit 1
 }
 
 # ---------------------------------------------------------------- 1. D1
-Step "1/6 准备 D1 数据库"
+Step "1/5 准备 D1 数据库"
 $tomlText = Get-Content $TOML -Raw
 
 if ($tomlText -match 'REPLACE_ME') {
@@ -60,21 +60,11 @@ if ($tomlText -match 'REPLACE_ME') {
 }
 
 # ---------------------------------------------------------------- 2. 建表
-Step "2/6 建表"
+Step "2/5 建表"
 Run "npx --yes wrangler@4 d1 execute $D1_NAME --remote --file=./schema.sql --yes" | Out-Null
 
-# ---------------------------------------------------------------- 3. API_KEY
-Step "3/6 写入 API_KEY"
-$apiKey = Read-Host "API_KEY（直接回车用默认生成值）"
-if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = $DEFAULT_API_KEY }
-
-$tmpSecrets = Join-Path $PSScriptRoot '.secrets.tmp.json'
-Write-Utf8NoBom $tmpSecrets ((@{ API_KEY = $apiKey } | ConvertTo-Json))
-Run "npx --yes wrangler@4 secret bulk $tmpSecrets" | Out-Null
-Remove-Item $tmpSecrets -Force
-
-# ---------------------------------------------------------------- 4. 首次部署
-Step "4/6 首次部署"
+# ---------------------------------------------------------------- 3. 首次部署
+Step "3/5 首次部署（让 Worker 先存在，才能写 secret）"
 $deployOut = Run "npx --yes wrangler@4 deploy"
 
 $workerUrl = $null
@@ -86,29 +76,33 @@ if (-not $workerUrl) {
 }
 Write-Host "Worker 地址：$workerUrl" -ForegroundColor Green
 
-# ---------------------------------------------------------------- 5. 企业微信
-Step "5/6 配置企业微信 Webhook"
-Write-Host "在手机企业微信里：群 → ··· → 群机器人 → 复制 Webhook 地址"
+# ---------------------------------------------------------------- 4. 密钥
+Step "4/5 配置密钥"
+Write-Host "API_KEY 直接回车用默认生成值即可（App 里也要填同一个）。"
+$apiKey = Read-Host "API_KEY（回车用默认）"
+if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = $DEFAULT_API_KEY }
+
+Write-Host ""
+Write-Host "企业微信里：群 → ··· → 群机器人 → 复制 Webhook 地址"
 Write-Host "格式：https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
-$webhook = Read-Host "粘贴 Webhook 地址"
-$webhook = $webhook.Trim()
+$webhook = (Read-Host "粘贴企业微信 Webhook").Trim()
 if ($webhook -notmatch '^https://qyapi\.weixin\.qq\.com/cgi-bin/webhook/send\?key=') {
   Write-Host "看起来不像企业微信 Webhook，仍继续写入，稍后用日志排查" -ForegroundColor Yellow
 }
 
-@{ WECOM_WEBHOOK = $webhook } | ConvertTo-Json | ForEach-Object { Write-Utf8NoBom $tmpSecrets $_ }
+$tmpSecrets = Join-Path $PSScriptRoot '.secrets.tmp.json'
+Write-Utf8NoBom $tmpSecrets ((@{ API_KEY = $apiKey; WECOM_WEBHOOK = $webhook } | ConvertTo-Json))
 Run "npx --yes wrangler@4 secret bulk $tmpSecrets" | Out-Null
 Remove-Item $tmpSecrets -Force
 
-# ---------------------------------------------------------------- 6. 回填域名再部署
-Step "6/6 回填 PUBLIC_BASE_URL 并重新部署"
+# ---------------------------------------------------------------- 5. 回填域名再部署
+Step "5/5 回填 PUBLIC_BASE_URL 并重新部署"
 $tomlText = Get-Content $TOML -Raw
 $tomlText = $tomlText -replace 'PUBLIC_BASE_URL\s*=\s*"[^"]*"', ('PUBLIC_BASE_URL = "' + $workerUrl + '"')
 Write-Utf8NoBom $TOML $tomlText
 
 Run "npx --yes wrangler@4 deploy" | Out-Null
 
-# ---------------------------------------------------------------- 验活
 Step "验证"
 try {
   $health = Invoke-RestMethod -Uri "$workerUrl/health" -TimeoutSec 15
