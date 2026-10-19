@@ -15,9 +15,7 @@ on:
       - 'app/**'
       - '.github/workflows/ios-unsigned.yml'
 
-concurrency:
-  group: ios-unsigned-${{ github.ref }}
-  cancel-in-progress: true
+# 故意不设 concurrency：多人/多次手动触发时，不要互相取消正在跑的构建
 
 env:
   CI: '1'
